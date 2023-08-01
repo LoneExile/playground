@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "f7sRu8m5i+rGUS78yeoKxKKfry7i5eDdObsHQjd9z3uSldCHgZq2Etmgw+9Jf+7++UW1hKUU2Ral7HY/xJbOXg==",
+  "success": true,
+  "projectFilePath": "/Users/apinant/Developer/project/playground/dotnet/BuberBreakfast/BuberBreakfast/BuberBreakfast.csproj",
+  "expectedPackageFiles": [
+    "/Users/apinant/.nuget/packages/erroror/1.2.1/erroror.1.2.1.nupkg.sha512"
+  ],
+  "logs": []
+}
