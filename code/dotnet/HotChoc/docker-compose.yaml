@@ -1,0 +1,11 @@
+version: '3.9'
+
+services:
+  hotchoc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hotchoc
+    ports:
+      - '5000:5000'
+    restart: always
