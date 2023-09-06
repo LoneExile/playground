@@ -25,6 +25,7 @@ builder.Services.AddOpenTelemetry()
                                             .AddConsoleExporter()
                                             .AddOtlpExporter(opt =>
                                                 {
+                                                    // opt.Endpoint = new Uri("http://otel-collector:4317");
                                                     opt.Endpoint = new Uri("http://localhost:4317");
                                                 }));
 
