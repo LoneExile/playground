@@ -115,3 +115,9 @@ spec:
     requests:
       storage: 50Gi
 ```
+
+---
+
+https://github.com/nvuillam/npm-groovy-lint
+
+https://www.jenkins.io/doc/book/pipeline/jenkinsfile/#using-environment-variables
