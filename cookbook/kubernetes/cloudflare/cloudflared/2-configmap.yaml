@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared
+  namespace: cloudflared
+data:
+  # <service-name>.<namespace>.svc.cluster.local
+  config.yaml: |
+    tunnel: kube
+    credentials-file: /etc/cloudflared/creds/credentials.json
+    metrics: 0.0.0.0:2000
+    no-autoupdate: true
+    ingress:
+    - hostname: tunnel.<URL>.io
+      service: http://nginx.default.svc.cluster.local:80
+    - hostname: grafana.<URL>.io
+      service: http://grafana.monitoring.svc.cluster.local:80
+    - service: http_status:404

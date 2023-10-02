@@ -1,5 +1,7 @@
 # Cloudflare
 
+- [Cloudflare tunnel Kubernetes](https://developers.cloudflare.com/cloudflare-one/tutorials/many-cfd-one-tunnel/)
+
 ## Install cloudflared
 
 **this is bookworm specific**

@@ -1,6 +1,10 @@
-# Helm
+# [MetalLB](https://github.com/metallb/metallb)
 
-## [Install](https://helm.sh/docs/intro/install/)
+MetalLB is a load-balancer implementation for bare metal Kubernetes clusters,
+
+## Helm
+
+### [Install](https://helm.sh/docs/intro/install/)
 
 ```bash
 curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
@@ -19,7 +23,7 @@ chmod 644 $HOME/.kube/config
 
 ```
 
-# [MetalLB](https://metallb.universe.tf/installation/)
+MetalLB](https://metallb.universe.tf/installation/)
 
 ```bash
 helm repo add metallb https://metallb.github.io/metallb

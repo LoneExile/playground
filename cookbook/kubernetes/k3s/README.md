@@ -1,15 +1,18 @@
-# !/usr/bin/env bash
+# [K3s](https://github.com/k3s-io/k3s)
 
-# Install k3s
+Lightweight Kubernetes. Easy to install, half the memory, all in a binary less
+than 100 MB.
 
-## Install k3s on master node
+## Install k3s
+
+### Install k3s on master node
 
 ```bash
 
 curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL=v1.27.4+k3s1 INSTALL_K3S_EXEC="--disable servicelb --disable traefik --write-kubeconfig-mode 644 --kube-apiserver-arg default-not-ready-toleration-seconds=10 --kube-apiserver-arg default-unreachable-toleration-seconds=10" sh -s -
 ```
 
-## Install k3s on worker node
+### Install k3s on worker node
 
 ```bash
 curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL=v1.27.4+k3s1 K3S_URL=https://MASTER_IP:6443 K3S_TOKEN=K3S_TOKEN INSTALL_K3S_CHANNEL=v1.27.4+k3s1 sh -s -
@@ -17,21 +20,21 @@ curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL=v1.27.4+k3s1 K3S_URL=https://
 
 `cp /etc/rancher/k3s/k3s.yaml ~/.kube/config`
 
-# Uninstalling
+## Uninstalling
 
-## To uninstall K3s from a server node, run
+### To uninstall K3s from a server node, run
 
 ```bash
 /usr/local/bin/k3s-uninstall.sh
 ```
 
-## To uninstall K3s from an agent node, run
+### To uninstall K3s from an agent node, run
 
 ```bash
 /usr/local/bin/k3s-agent-uninstall.sh
 ```
 
-# reference
+## reference
 
 <https://github.com/k3s-io/k3s/issues/1264>
 

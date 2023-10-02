@@ -1,31 +1,4 @@
-# base kube
-
-## [cert-manager](https://cert-manager.io/docs/installation/#default-static-install)
-
-```bash
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
-```
-
-## [metallb](https://metallb.universe.tf/installation/#installation-by-manifest)
-
-```bash
-kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.13.11/config/manifests/metallb-native.yaml
-wget https://raw.githubusercontent.com/LoneExile/playground/main/cookbook/k3s/metallb-layer2.yaml
-kubectl apply -f metallb-layer2.yaml
-```
-
-## prometheus
-
-```bash
-git clone https://github.com/prometheus-operator/kube-prometheus.git
-cd kube-prometheus
-kubectl create -f manifests/setup
-until kubectl get servicemonitors --all-namespaces ; do date; sleep 1; echo ""; done
-kubectl create -f manifests/
-kubectl delete networkpolicy grafana -n monitoring
-```
-
-## rook-ceph
+# rook-ceph
 
 ### install rook-ceph
 
@@ -158,4 +131,21 @@ ceph orch device zap <HOST> <DEVICE> --force
 # ceph balancer status
 # ceph balancer mode upmap
 # ceph balancer on
+```
+
+### troubleshoot
+
+```bash
+ceph crash ls
+ceph crash info [<CRASH_ID>]
+
+ceph crash archive [<CRASH_ID>]
+ceph crash archive-all
+```
+
+```bash
+ceph mgr module ls
+ceph mgr module enable rook
+ceph orch set backend rook
+ceph orch status
 ```
