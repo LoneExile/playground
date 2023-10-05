@@ -126,6 +126,12 @@ ceph osd purge osd.<OSD_ID> --yes-i-really-mean-it
 ```
 
 ```bash
+ceph auth list
+ceph osd rm osd.<YOUR-OSD-ID>
+ceph auth del osd.<YOUR-OSD-ID>
+```
+
+```bash
 kubectl -n rook-ceph scale deployment rook-ceph-operator --replicas=1
 kubectl -n rook-ceph scale deployment rook-ceph-osd-0 --replicas=1
 
