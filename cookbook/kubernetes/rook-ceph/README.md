@@ -113,6 +113,8 @@ ceph orch daemon add osd node1:/dev/sda1
 ```bash
 kubectl -n rook-ceph scale deployment rook-ceph-operator --replicas=0
 kubectl -n rook-ceph scale deployment rook-ceph-osd-0 --replicas=0
+kubectl drain <NODE_NAME> --ignore-daemonsets
+kubectl uncordon <NODE_NAME>
 ```
 
 ```bash
