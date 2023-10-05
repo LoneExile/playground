@@ -111,6 +111,11 @@ ceph orch daemon add osd node1:/dev/sda1
 ### Removing an OSD
 
 ```bash
+kubectl -n rook-ceph scale deployment rook-ceph-operator --replicas=0
+kubectl -n rook-ceph scale deployment rook-ceph-osd-0 --replicas=0
+```
+
+```bash
 ceph osd out osd.<OSD_ID>
 ```
 
@@ -119,7 +124,10 @@ ceph osd purge osd.<OSD_ID> --yes-i-really-mean-it
 ```
 
 ```bash
-kubectl -n rook-ceph delete deployment rook-ceph-osd-<OSD_ID>
+kubectl -n rook-ceph scale deployment rook-ceph-operator --replicas=1
+kubectl -n rook-ceph scale deployment rook-ceph-osd-0 --replicas=1
+
+# kubectl -n rook-ceph delete deployment rook-ceph-osd-<OSD_ID>
 ```
 
 ### Reuse existing drives
