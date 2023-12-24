@@ -62,6 +62,15 @@ kubectl delete -f cloudflared.yaml -n cloudflared && kubectl apply -f cloudflare
 
 ```
 
+### Adding new route
+
+- edit the file cloudflared.yaml
+- update the configmap
+```bash
+# then
+cloudflared tunnel route dns [<tunnel>] [<hostname>]
+```
+
 ### Trobleshooting
 
 ```bash
