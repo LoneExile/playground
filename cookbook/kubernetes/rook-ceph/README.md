@@ -20,11 +20,14 @@ kubectl create -f toolbox.yaml
 
 ```bash
 kubectl create -f filesystem.yaml
+```
+```bash
+# not need?
 kubectl create -f deploy/examples/csi/cephfs/kube-registry.yaml
 ```
 
 ```bash
-# kubectl create -f storageclass.yaml
+kubectl create -f storageclass.yaml
 # kubectl create -f filesystem.yaml
 # kubectl create -f object.yaml
 # kubectl create -f pool.yaml
@@ -62,6 +65,9 @@ sudo rm -rf /var/lib/rook
 ```
 
 ## format and mount cephfs
+
+after burn image to sd card, trim the partition via fdisk or gparted.
+this partition will be used for cephfs.
 
 ```bash
 sudo fdisk /dev/sda
