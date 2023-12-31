@@ -10,7 +10,7 @@
 #  resources:
 #    requests:
 #      storage: 10Gi
----
+# ---
 apiVersion: v1
 kind: Service
 metadata:
@@ -40,14 +40,14 @@ spec:
         app: filebrowser
     spec:
       containers:
-      - name: filebrowser
-        image: filebrowser/filebrowser:s6
-        ports:
-        - containerPort: 80
-        volumeMounts:
-        - mountPath: /srv
-          name: filebrowser-volume
+        - name: filebrowser
+          image: filebrowser/filebrowser:s6
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - mountPath: /srv
+              name: filebrowser-volume
       volumes:
-      - name: filebrowser-volume
-        persistentVolumeClaim:
-          claimName: main-pvc
+        - name: filebrowser-volume
+          persistentVolumeClaim:
+            claimName: main-pvc

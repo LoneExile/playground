@@ -2,6 +2,8 @@
 
 ### install rook-ceph
 
+https://rook.io/docs/rook/latest-release/Getting-Started/quickstart/#prerequisites
+
 ```bash
 git clone --single-branch --branch v1.12.4 https://github.com/rook/rook.git
 cd rook/deploy/examples

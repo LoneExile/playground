@@ -17,38 +17,39 @@ spec:
         app: syncthing
     spec:
       containers:
-      - image: linuxserver/syncthing:arm64v8-latest
-        name: syncthing
-        resources:
-          limits:
-            memory: "256Mi"
-            cpu: "500m"
-        ports:
-        - containerPort: 8384
+        - image: linuxserver/syncthing:arm64v8-latest
           name: syncthing
-          protocol: TCP
-        - containerPort: 22000
-          protocol: TCP
-          name: to-listen
-        - containerPort: 22000
-          protocol: UDP
-          name: to-discover
-        volumeMounts:
-        - name: syncthing-persistent-storage
-          mountPath: /srv
-        - name: syncthing-persistent-storage
-          mountPath: "/config"
-          subPath: config
-        - name: syncthing-persistent-storage
-          mountPath: "/data1"
-          subPath: data1
-        - name: syncthing-persistent-storage
-          mountPath: "/data2"
-          subPath: data2
+          resources:
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          ports:
+            - containerPort: 8384
+              name: syncthing
+              protocol: TCP
+            - containerPort: 22000
+              protocol: TCP
+              name: to-listen
+            - containerPort: 22000
+              protocol: UDP
+              name: to-discover
+          volumeMounts:
+            ## this path not correct?
+            - name: syncthing-persistent-storage
+              mountPath: /srv
+            - name: syncthing-persistent-storage
+              mountPath: "/config"
+              subPath: config
+            - name: syncthing-persistent-storage
+              mountPath: "/data1"
+              subPath: data1
+            - name: syncthing-persistent-storage
+              mountPath: "/data2"
+              subPath: data2
       volumes:
-      - name: syncthing-persistent-storage
-        persistentVolumeClaim:
-          claimName: main-pvc
+        - name: syncthing-persistent-storage
+          persistentVolumeClaim:
+            claimName: main-pvc
 ---
 apiVersion: v1
 kind: Service
