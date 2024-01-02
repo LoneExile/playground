@@ -39,15 +39,24 @@ spec:
             - containerPort: 42069
               name: exatorrent2
               protocol: TCP
-              # this create /exa/exadir with link srv ?
-              # should be correct?
           volumeMounts:
-            - mountPath: /exa
+            # - mountPath: /exa/exadir/cache
+            #   name: exatorrent2-volume
+            #   subPath: cache
+            # - mountPath: /exa/exadir/config
+            #   name: exatorrent2-volume
+            #   subPath: config
+            # - mountPath: /exa/exadir/data
+            #   name: exatorrent2-volume
+            #   subPath: data
+            # - mountPath: /exa/exadir/torrents
+            #   name: exatorrent2-volume
+            #   subPath: torrents
+            
+            - mountPath: /exa/exadir
               name: exatorrent2-volume
-              subPath: exa
-            - mountPath: /srv
-              name: exatorrent2-volume
-              subPath: srv
+              subPath: exadir
+
       volumes:
         - name: exatorrent2-volume
           persistentVolumeClaim:

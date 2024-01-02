@@ -51,9 +51,17 @@ spec:
             - mountPath: /database
               name: filebrowser2-volume
               subPath: database
+            - mountPath: /config
+              name: filebrowser2-volume
+              subPath: config
             - mountPath: /srv
               name: filebrowser2-volume
               subPath: srv
+
+            - mountPath: /exadir # exa
+              name: filebrowser2-volume
+              subPath: exadir
+            
       volumes:
         - name: filebrowser2-volume
           persistentVolumeClaim:
