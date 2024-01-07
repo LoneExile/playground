@@ -69,6 +69,9 @@ spec:
             - mountPath: /config # jelly
               name: filebrowser-volume
               subPath: config
+            - mountPath: /media # jelly
+              name: filebrowser-volume
+              subPath: media
 
             - mountPath: /exadir # exa
               name: filebrowser-volume

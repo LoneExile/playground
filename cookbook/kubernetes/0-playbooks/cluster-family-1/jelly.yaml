@@ -43,6 +43,14 @@ spec:
               mountPath: "/config"
               subPath: config
 
+            - name: jelly-storage
+              mountPath: "/media"
+              subPath: media
+
+            - mountPath: /exadir # exa
+              name: jelly-storage
+              subPath: exadir
+
             - name: device-dri
               mountPath: /dev/dri
             - name: device-dma-heap
