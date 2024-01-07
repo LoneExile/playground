@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: memos-service
+  labels:
+    app: memos
+spec:
+  selector:
+    app: memos
+  ports:
+    - protocol: TCP
+      port: 5230
+      targetPort: 5230
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memos-deployment
+  labels:
+    app: memos
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: memos
+  template:
+    metadata:
+      labels:
+        app: memos
+    spec:
+      containers:
+        - name: memos
+          image: ghcr.io/usememos/memos:latest
+          ports:
+            - containerPort: 5230
+          volumeMounts:
+            - name: memos-storage
+              mountPath: /var/opt/memos
+      volumes:
+        - name: memos-storage
+          persistentVolumeClaim:
+            claimName: main-pvc

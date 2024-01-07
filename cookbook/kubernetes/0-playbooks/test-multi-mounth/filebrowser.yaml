@@ -1,17 +1,4 @@
 apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
- name: main2-pvc
- namespace: default
-spec:
- storageClassName: rook-cephfs
- accessModes:
-   - ReadWriteMany
- resources:
-   requests:
-     storage: 10Gi
----
-apiVersion: v1
 kind: Service
 metadata:
   name: filebrowser2-service
@@ -51,7 +38,7 @@ spec:
             - mountPath: /database
               name: filebrowser2-volume
               subPath: database
-            - mountPath: /config
+            - mountPath: /config # settings.json
               name: filebrowser2-volume
               subPath: config
             - mountPath: /srv
@@ -61,6 +48,10 @@ spec:
             - mountPath: /exadir # exa
               name: filebrowser2-volume
               subPath: exadir
+
+            - mountPath: /memos # memos
+              name: filebrowser2-volume
+              subPath: memos
             
       volumes:
         - name: filebrowser2-volume
