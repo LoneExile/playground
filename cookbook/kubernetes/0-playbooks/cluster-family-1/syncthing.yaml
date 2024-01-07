@@ -18,6 +18,7 @@ spec:
     spec:
       containers:
         - image: linuxserver/syncthing:arm64v8-latest
+        # - image: linuxserver/syncthing:latest
           name: syncthing
           resources:
             limits:
@@ -34,8 +35,8 @@ spec:
               protocol: UDP
               name: to-discover
           volumeMounts:
-            - name: syncthing-persistent-storage
-              mountPath: /srv
+            # - name: syncthing-persistent-storage
+            #   mountPath: /srv
             - name: syncthing-persistent-storage
               mountPath: "/config"
               subPath: config

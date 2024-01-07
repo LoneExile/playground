@@ -36,6 +36,7 @@ spec:
           volumeMounts:
             - name: memos-storage
               mountPath: /var/opt/memos
+              subPath: memos
       volumes:
         - name: memos-storage
           persistentVolumeClaim:

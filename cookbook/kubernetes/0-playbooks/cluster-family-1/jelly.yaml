@@ -1,0 +1,80 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jelly-service
+  labels:
+    app: jelly
+spec:
+  selector:
+    app: jelly
+  ports:
+    - protocol: TCP
+      port: 8096
+      targetPort: 8096
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jelly-deployment
+  labels:
+    app: jelly
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jelly
+  template:
+    metadata:
+      labels:
+        app: jelly
+    spec:
+      containers:
+        - name: jelly
+          image: nyanmisaka/jellyfin:latest-rockchip
+          # image: nyanmisaka/jellyfin:latest
+          ports:
+            - containerPort: 8096
+          volumeMounts:
+            # - name: jelly-storage
+            #   mountPath: /srv
+
+            - name: jelly-storage
+              mountPath: "/config"
+              subPath: config
+
+            - name: device-dri
+              mountPath: /dev/dri
+            - name: device-dma-heap
+              mountPath: /dev/dma_heap
+            - name: device-mali0
+              mountPath: /dev/mali0
+            - name: device-rga
+              mountPath: /dev/rga
+            - name: device-mpp-service
+              mountPath: /dev/mpp_service
+          securityContext:
+            privileged: true
+      # nodeSelector:
+      #   kubernetes.io/hostname: worker-2
+
+      volumes:
+        - name: jelly-storage
+          persistentVolumeClaim:
+            claimName: main-pvc
+
+        - name: device-dri
+          hostPath:
+            path: /dev/dri
+        - name: device-dma-heap
+          hostPath:
+            path: /dev/dma_heap
+        - name: device-mali0
+          hostPath:
+            path: /dev/mali0
+        - name: device-rga
+          hostPath:
+            path: /dev/rga
+        - name: device-mpp-service
+          hostPath:
+            path: /dev/mpp_service

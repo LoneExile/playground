@@ -36,8 +36,6 @@ spec:
             - containerPort: 42069
               name: exatorrent2
               protocol: TCP
-              # this create /exa/exadir with link srv ?
-              # should be correct?
           volumeMounts:
             - mountPath: /exa
               name: exatorrent-volume
