@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stressapptest
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: stressapptest
+  template:
+    metadata:
+      labels:
+        app: stressapptest
+    spec:
+      containers:
+        - name: stressapptest
+          image: loneexile/stress-test:5min
