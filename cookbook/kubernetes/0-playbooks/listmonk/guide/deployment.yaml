@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: listmonk
+  name: listmonk
+  namespace: listmonk
+  annotations:
+    eevans.me/secret-ref: b0c18
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: listmonk
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: listmonk
+        eevans.me/public: "true"
+        eevans.me/postgres-access: "true"
+    spec:
+      initContainers:
+        - image: listmonk/listmonk:v2.5.1
+          name: install
+          command:
+            - /bin/sh
+            - -c
+            - |
+              ./listmonk --install --config /listmonk/config.toml --idempotent --yes
+          envFrom:
+            - secretRef:
+                name: listmonk-secrets
+          volumeMounts:
+            - name: config
+              mountPath: /listmonk/config.toml
+              subPath: config.toml
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1900
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 750m
+              memory: 256Mi
+      containers:
+        - image: listmonk/listmonk:v2.5.1
+          name: listmonk
+          envFrom:
+            - secretRef:
+                name: listmonk-secrets
+          ports:
+            - name: http
+              containerPort: 9000
+          volumeMounts:
+            - name: config
+              mountPath: /listmonk/config.toml
+              subPath: config.toml
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1900
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: listmonk
+---

@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3-website-config
+  namespace: listmonk
+data:
+  website.json: |
+    {
+      "IndexDocument": {
+        "Suffix": "index.html"
+      }
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prep-listmonk-uploads-bucket
+  namespace: listmonk
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: aws
+          image: public.ecr.aws/aws-cli/aws-cli:2.13.29
+          command:
+            - bash
+            - -c
+            - |
+              set -xeuo pipefail
+
+              export AWS_ENDPOINT_URL="http://$BUCKET_HOST"
+              export AWS_REGION=us-east-1
+              aws s3api put-bucket-website --bucket "$BUCKET_NAME" --website-configuration file:///config/website.json
+          envFrom:
+            - secretRef:
+                name: listmonk-uploads
+            - configMapRef:
+                name: listmonk-uploads
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          securityContext:
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1234
+            runAsGroup: 1234
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        - name: config
+          configMap:
+            name: s3-website-config
+---

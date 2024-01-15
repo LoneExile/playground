@@ -1,0 +1,58 @@
+
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: listmonk-uploads
+  namespace: rook-ceph
+spec:
+  parentRefs:
+    - name: ingress-public
+      namespace: ingress-public
+  hostnames:
+    - list-uploads.eevans.co
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            hostname: listmonk-uploads.s3.eevans.co
+      backendRefs:
+        - name: rook-ceph-rgw-s3-public
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: listmonk-public
+  namespace: listmonk
+spec:
+  parentRefs:
+    - name: ingress-public
+      namespace: ingress-public
+  hostnames:
+    - eevans.co
+  # See https://listmonk.app/docs/configuration/#public-endpoints-to-expose-to-the-internet
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /subscription
+        - path:
+            type: PathPrefix
+            value: /link
+        - path:
+            type: PathPrefix
+            value: /campaign
+        - path:
+            type: PathPrefix
+            value: /public
+        - path:
+            type: PathPrefix
+            value: /webhooks/service
+      backendRefs:
+        - name: listmonk
+          port: 9000
+---

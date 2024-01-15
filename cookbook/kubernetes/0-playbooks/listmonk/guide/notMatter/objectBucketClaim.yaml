@@ -1,0 +1,9 @@
+apiVersion: objectbucket.io/v1alpha1
+kind: ObjectBucketClaim
+metadata:
+  name: listmonk-uploads
+  namespace: listmonk
+spec:
+  bucketName: listmonk-uploads
+  storageClassName: rook-ceph-s3-public
+---

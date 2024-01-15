@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: listmonk
+  namespace: listmonk
+data:
+  config.toml: |
+    [app]
+    address = "0.0.0.0:9000"
+    admin_username = "listmonk"
+
+    # Database.
+    [db]
+    host = "postgres.postgres"
+    port = 5432
+    user = "listmonk"
+
+    # Ensure that this database has been created in Postgres.
+    database = "listmonk"
+
+    ssl_mode = "disable"
+    max_open = 25
+    max_idle = 25
+    max_lifetime = "300s"
+
+    # Optional space separated Postgres DSN params. eg: "application_name=listmonk gssencmode=disable"
+    params = ""
+---

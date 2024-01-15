@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: listmonk-admin
+  namespace: listmonk
+  labels:
+    app.kubernetes.io/name: listmonk
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - listmonk.eevans.me
+      secretName: listmonk-admin-tls
+  rules:
+    - host: listmonk.eevans.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: listmonk
+                port:
+                  name: http
+---

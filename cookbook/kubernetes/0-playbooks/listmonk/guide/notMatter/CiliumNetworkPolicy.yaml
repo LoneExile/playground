@@ -1,0 +1,56 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: listmonk
+  namespace: listmonk
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: listmonk
+  ingress:
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "9000"
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: rook-ceph
+            app.kubernetes.io/instance: s3-public
+      toPorts:
+        - ports:
+            - port: "8080"
+            - port: "80"
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: postgres
+            app.kubernetes.io/name: postgres
+      toPorts:
+        - ports:
+            - port: "5432"
+    - toEndpoints:
+        - {}
+    - toFQDNs:
+        - matchName: email-smtp.us-west-2.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "465"
+    - toFQDNs:
+        - matchName: hcaptcha.com
+        - matchName: sns.us-west-2.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+---
