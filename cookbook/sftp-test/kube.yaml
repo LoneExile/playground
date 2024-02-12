@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sftp1-service
+  labels:
+    app: sftp1-test
+spec:
+  selector:
+    app: sftp1-test
+  ports:
+    - protocol: TCP
+      port: 2244
+      targetPort: 22
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sftp1-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sftp1-test
+  template:
+    metadata:
+      labels:
+        app: sftp1-test
+    spec:
+      containers:
+        - name: sftp1-test
+          image: loneexile/sftp-test:latest
+          ports:
+            - containerPort: 22
+      # nodeSelector:
+      #   kubernetes.io/hostname: worker-1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sftp2-service
+  labels:
+    app: sftp2-test
+spec:
+  selector:
+    app: sftp2-test
+  ports:
+    - protocol: TCP
+      port: 2245
+      targetPort: 22
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sftp2-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sftp2-test
+  template:
+    metadata:
+      labels:
+        app: sftp2-test
+    spec:
+      containers:
+        - name: sftp2-test
+          image: loneexile/sftp-test:latest
+          ports:
+            - containerPort: 22
+      # nodeSelector:
+      #   kubernetes.io/hostname: worker-2
+
+## dd if=/dev/zero of=upload_test bs=1M count=size_in_megabytes
+## chown sftp_user:sftp_user upload_test
+## sftp -P 2245 sftp_user@sftp2-service.default.svc.cluster.local
