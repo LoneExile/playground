@@ -123,8 +123,6 @@ spec:
       containers:
         - name: jenkins
           image: jenkins/jenkins:lts
-          # image: jenkins/jenkins:2.450
-          # image: jenkins/jenkins:2.235.5
           resources:
             limits:
               memory: '2Gi'
