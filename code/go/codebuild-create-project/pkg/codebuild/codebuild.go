@@ -1,108 +1,101 @@
 package codebuild
 
 import (
-	"codebuild-bitbucket/config"
+	gconf "codebuild-bitbucket/config"
+	"context"
 	"fmt"
-	"os"
+	"log"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/codebuild"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/codebuild"
+	"github.com/aws/aws-sdk-go-v2/service/codebuild/types"
 )
 
+var conf = gconf.LoadConfig()
+
 func Codebuild(projects [][]string) {
-	cfg := config.LoadConfig()
-
-	options := session.Options{
-		Config: aws.Config{Region: aws.String(cfg.Region)},
-	}
-	// options.Profile = "void"
-
-	sess, err := session.NewSessionWithOptions(options)
+	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
-		fmt.Println("Got error creating session: ", err)
-		os.Exit(1)
+		log.Fatalf("Unable to load SDK config: %v", err)
 	}
 
-	svc := codebuild.New(sess)
+	svc := codebuild.NewFromConfig(cfg)
 
-	result, err := svc.ListProjects(
-		&codebuild.ListProjectsInput{
-			SortBy:    aws.String("NAME"),
-			SortOrder: aws.String("ASCENDING")})
-
-	if err != nil {
-		fmt.Println("Got error listing projects: ", err)
-		os.Exit(1)
+	if svc == nil {
+		log.Fatalf("Unable to create S3 service")
 	}
 
-	for _, p := range result.Projects {
-		fmt.Println(*p)
-	}
-
-	if cfg.CleanUp == "true" {
+	if conf.CleanUp == "true" {
 		fmt.Println("Cleaning up all CodeBuild projects")
-		deleteAllCodeBuildProjects(sess)
+		deleteAllCodeBuildProjects(svc)
 	} else {
 		for _, project := range projects {
-			createCodeBuildProject(sess, project)
+			createCodeBuildProject(svc, project)
 		}
 	}
 }
 
-func createCodeBuildProject(sess *session.Session, project []string) {
-	cfg := config.LoadConfig()
-	svc := codebuild.New(sess)
+func createCodeBuildProject(svc *codebuild.Client, project []string) {
 	fmt.Println(project)
 
 	input := &codebuild.CreateProjectInput{
 		Name: aws.String(project[0]),
-		Source: &codebuild.ProjectSource{
-			Type:      aws.String(cfg.RepoSource),
+		Source: &types.ProjectSource{
+			Type:      types.SourceType(conf.RepoSource),
 			Location:  aws.String(project[2]),
-			Buildspec: aws.String(cfg.BuildSpec),
+			Buildspec: aws.String(conf.BuildSpec),
 		},
-		Environment: &codebuild.ProjectEnvironment{
-			ComputeType:    aws.String(cfg.ComputeType),
-			Image:          aws.String(cfg.Image),
-			Type:           aws.String("LINUX_CONTAINER"),
+		Environment: &types.ProjectEnvironment{
+			ComputeType:    types.ComputeType(conf.ComputeType),
+			Image:          aws.String(conf.Image),
+			Type:           types.EnvironmentTypeLinuxContainer,
 			PrivilegedMode: aws.Bool(true),
 		},
-		ServiceRole: aws.String(cfg.ServiceRole),
-		Artifacts: &codebuild.ProjectArtifacts{
-			Type: aws.String("NO_ARTIFACTS"),
+		ServiceRole: aws.String(conf.ServiceRole),
+		Artifacts: &types.ProjectArtifacts{
+			Type: types.ArtifactsTypeNoArtifacts,
 		},
 	}
 
-	result, err := svc.CreateProject(input)
+	ctx := context.TODO()
+
+	result, err := svc.CreateProject(ctx, input)
 	if err != nil {
-		fmt.Println("Got error creating project: ", err)
-		os.Exit(1)
+		fmt.Println("Got an error creating project: ", err)
+		return
 	}
 
 	fmt.Printf("Created CodeBuild project: %s\n", *result.Project.Name)
 }
 
-func deleteAllCodeBuildProjects(sess *session.Session) {
-	svc := codebuild.New(sess)
+func deleteAllCodeBuildProjects(svc *codebuild.Client) {
 
-	listProjectsInput := &codebuild.ListProjectsInput{}
-	projects, err := svc.ListProjects(listProjectsInput)
-	if err != nil {
-		fmt.Println("Got error retrieving CodeBuild projects:", err)
-		os.Exit(1)
-	}
+	input := &codebuild.ListProjectsInput{}
 
-	for _, projectName := range projects.Projects {
-		fmt.Printf("Deleting project %s\n", *projectName)
-		deleteProjectInput := &codebuild.DeleteProjectInput{
-			Name: projectName,
-		}
-		_, err := svc.DeleteProject(deleteProjectInput)
+	for {
+		result, err := svc.ListProjects(context.TODO(), input)
+		fmt.Println("Projects:", result.Projects)
 		if err != nil {
-			fmt.Printf("Got error deleting project %s: %s\n", *projectName, err)
-		} else {
-			fmt.Printf("Successfully deleted project %s\n", *projectName)
+			log.Fatalf("Failed to list projects, %v", err)
 		}
+
+		for _, projectName := range result.Projects {
+			fmt.Println("Project Name:", projectName)
+			deleteProjectInput := &codebuild.DeleteProjectInput{
+				Name: aws.String(projectName),
+			}
+			_, err := svc.DeleteProject(context.TODO(), deleteProjectInput)
+			if err != nil {
+				fmt.Printf("Got error deleting project %s: %s\n", *aws.String(projectName), err)
+			} else {
+				fmt.Printf("Successfully deleted project %s\n", *aws.String(projectName))
+			}
+		}
+
+		if result.NextToken == nil {
+			break
+		}
+		input.NextToken = result.NextToken
 	}
 }

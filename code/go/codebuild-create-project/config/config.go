@@ -15,7 +15,6 @@ type Config struct {
 	BuildSpec       string
 	ComputeType     string
 	Image           string
-	Region          string
 	CleanUp         string
 }
 
@@ -31,7 +30,6 @@ func LoadConfig() *Config {
 		BuildSpec:       os.Getenv("BUILD_SPEC"),
 		ComputeType:     os.Getenv("COMPUTE_TYPE"),
 		Image:           os.Getenv("IMAGE"),
-		Region:          os.Getenv("REGION"),
 		CleanUp:         os.Getenv("CLEAN_UP"),
 	}
 }

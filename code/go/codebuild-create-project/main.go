@@ -5,10 +5,40 @@ import (
 	"codebuild-bitbucket/pkg/bitbucket"
 	"codebuild-bitbucket/pkg/codebuild"
 
-	"github.com/aws/aws-lambda-go/lambda"
-
 	"fmt"
+
+	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-lambda-go/lambda"
 )
+
+// func main() {
+
+// 	cfg := config.LoadConfig()
+// 	baseUrl := fmt.Sprintf("https://api.bitbucket.org/2.0/repositories/%s/", cfg.Workspace)
+
+// 	var allRepoNames [][]string
+
+// 	for url := baseUrl; url != ""; {
+// 		projects, next, err := bitbucket.FetchPage(url, cfg.User, cfg.Password)
+// 		if err != nil {
+// 			fmt.Println(err)
+// 		}
+// 		allRepoNames = append(allRepoNames, projects...)
+// 		url = next
+// 	}
+
+// 	for i := 0; i < len(allRepoNames); i++ {
+// 		for _, exclude := range cfg.ExcludeProjects {
+// 			if allRepoNames[i][0] == exclude {
+// 				allRepoNames = append(allRepoNames[:i], allRepoNames[i+1:]...)
+// 				i--
+// 				break
+// 			}
+// 		}
+// 	}
+
+// 	codebuild.Codebuild(allRepoNames)
+// }
 
 func main() {
 	lambda.Start(handler)
