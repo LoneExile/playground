@@ -32,28 +32,27 @@ spec:
       containers:
         - name: jelly
           image: nyanmisaka/jellyfin:latest-rockchip
-          # image: nyanmisaka/jellyfin:latest
+          # image: linuxserver/jellyfin:arm64v8-latest
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
           ports:
             - containerPort: 8096
           volumeMounts:
             # - name: jelly-storage
-            #   mountPath: /srv
-
-            - name: jelly-storage
-              mountPath: "/config"
-              subPath: config
+            #   mountPath: "/config"
+            #   subPath: jelly/config
+            # - name: jelly-storage
+            #   mountPath: "/cache"
+            #   subPath: jelly/cache
 
             - name: jelly-storage
               mountPath: "/media"
               subPath: media
 
-            - mountPath: /srv # flilebrowser
-              name: jelly-storage
-              subPath: srv
-
-            - mountPath: /exadir # exa
-              name: jelly-storage
-              subPath: exadir
+            - name: jelly-storage
+              mountPath: "/movie"
+              subPath: movie
 
             - name: device-dri
               mountPath: /dev/dri
@@ -73,7 +72,7 @@ spec:
       volumes:
         - name: jelly-storage
           persistentVolumeClaim:
-            claimName: main-pvc
+            claimName: pvc-smb
 
         - name: device-dri
           hostPath:
