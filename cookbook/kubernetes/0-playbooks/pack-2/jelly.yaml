@@ -39,16 +39,19 @@ spec:
           ports:
             - containerPort: 8096
           volumeMounts:
-            # - name: jelly-storage
-            #   mountPath: "/config"
-            #   subPath: jelly/config
-            # - name: jelly-storage
-            #   mountPath: "/cache"
-            #   subPath: jelly/cache
+            - name: jelly-volume-nfs
+              mountPath: "/config"
+              subPath: jelly/config
+            - name: jelly-volume-nfs
+              mountPath: "/cache"
+              subPath: jelly/cache
+            - name: jelly-volume-nfs
+              mountPath: "/media"
+              subPath: jelly/media
 
             - name: jelly-storage
-              mountPath: "/media"
-              subPath: media
+              mountPath: "/series"
+              subPath: Series
 
             - name: jelly-storage
               mountPath: "/movie"
@@ -73,6 +76,9 @@ spec:
         - name: jelly-storage
           persistentVolumeClaim:
             claimName: pvc-smb
+        - name: jelly-volume-nfs
+          persistentVolumeClaim:
+            claimName: bob-nfs-pvc
 
         - name: device-dri
           hostPath:

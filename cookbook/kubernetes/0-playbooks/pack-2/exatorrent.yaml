@@ -40,17 +40,17 @@ spec:
               name: exatorrent-2
               protocol: TCP
           volumeMounts:
-            # - mountPath: /exa/exadir/cache
-            #   name: exatorrent-volume
-            #   subPath: exa/cache
-            # - mountPath: /exa/exadir/config
-            #   name: exatorrent-volume
-            #   subPath: exa/config
+            - mountPath: /exa/exadir/cache
+              name: exatorrent-volume
+              subPath: exa/cache
+            - mountPath: /exa/exadir/config
+              name: exatorrent-volume
+              subPath: exa/config
             
             # NOTE: uncomment this will cause error
-            # - mountPath: /exa/exadir/data
-            #   name: exatorrent-volume
-            #   subPath: exa/data
+            - mountPath: /exa/exadir/data
+              name: exatorrent-volume-nfs
+              subPath: exa/data
             
             - mountPath: /exa/exadir/torrents
               name: exatorrent-volume
@@ -64,3 +64,6 @@ spec:
         - name: exatorrent-volume
           persistentVolumeClaim:
             claimName: pvc-smb
+        - name: exatorrent-volume-nfs
+          persistentVolumeClaim:
+            claimName: bob-nfs-pvc

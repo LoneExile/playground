@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: syncthing
+  labels:
+    app: syncthing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: syncthing
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: syncthing
+    spec:
+      containers:
+        - image: linuxserver/syncthing:arm64v8-latest
+        # - image: linuxserver/syncthing:latest
+          name: syncthing
+          resources:
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          ports:
+            - containerPort: 8384
+              name: syncthing
+              protocol: TCP
+            - containerPort: 22000
+              protocol: TCP
+              name: to-listen
+            - containerPort: 22000
+              protocol: UDP
+              name: to-discover
+          volumeMounts:
+            - name: syncthing-persistent-storage-nfs
+              mountPath: "/config"
+              subPath: syncthing/config
+            - name: syncthing-persistent-storage
+              mountPath: "/data1"
+              subPath: syncthing/data1
+            - name: syncthing-persistent-storage
+              mountPath: "/data2"
+              subPath: syncthing/data2
+      volumes:
+        - name: syncthing-persistent-storage
+          persistentVolumeClaim:
+            claimName: pvc-smb
+        - name: syncthing-persistent-storage-nfs
+          persistentVolumeClaim:
+            claimName: bob-nfs-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: syncthing-service
+  labels:
+    app: syncthing
+spec:
+  ports:
+    - name: http
+      port: 32080
+      targetPort: 8384
+      protocol: TCP
+    - protocol: TCP
+      port: 32000
+      targetPort: 22000
+      name: to-listen
+    - protocol: UDP
+      port: 32000
+      targetPort: 22000
+      name: to-discover
+  selector:
+    app: syncthing
