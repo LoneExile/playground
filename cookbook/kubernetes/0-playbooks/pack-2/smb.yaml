@@ -5,7 +5,7 @@ metadata:
 provisioner: smb.csi.k8s.io
 parameters:
   # source: //smb-server.default.svc.cluster.local/share
-  source: //192.168.1.23/bob
+  source: //192.168.1.23/smb
   # if csi.storage.k8s.io/provisioner-secret is provided, will create a sub directory
   # with PV name under source
   csi.storage.k8s.io/provisioner-secret-name: smbcreds
@@ -28,7 +28,7 @@ metadata:
   name: pv-smb
 spec:
   capacity:
-    storage: 600Gi
+    storage: 200Gi
   accessModes:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
@@ -43,7 +43,7 @@ spec:
     # volumeHandle: smb-server.default.svc.cluster.local/share##
     volumeHandle: smb-pv # Unique identifier for the PV
     volumeAttributes:
-      source: "//192.168.1.23/bob"
+      source: "//192.168.1.23/smb"
     nodeStageSecretRef:
       name: smbcreds
       namespace: default
@@ -58,6 +58,6 @@ spec:
     - ReadWriteMany
   resources:
     requests:
-      storage: 600Gi
+      storage: 200Gi
   volumeName: pv-smb
   storageClassName: smb
