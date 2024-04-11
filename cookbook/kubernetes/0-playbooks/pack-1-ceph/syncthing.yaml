@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: syncthing-service-ceph
+  labels:
+    app: syncthing-ceph
+spec:
+  ports:
+    - name: http
+      port: 32080
+      targetPort: 8384
+      protocol: TCP
+    - protocol: TCP
+      port: 32000
+      targetPort: 22000
+      name: to-listen
+    - protocol: UDP
+      port: 32000
+      targetPort: 22000
+      name: to-discover
+  selector:
+    app: syncthing-ceph
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: syncthing-ceph
+  labels:
+    app: syncthing-ceph
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: syncthing-ceph
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: syncthing-ceph
+    spec:
+      containers:
+        - image: linuxserver/syncthing:arm64v8-latest
+        # - image: linuxserver/syncthing:latest
+          name: syncthing-ceph
+          resources:
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          ports:
+            - containerPort: 8384
+              name: syncthing
+              protocol: TCP
+            - containerPort: 22000
+              protocol: TCP
+              name: to-listen
+            - containerPort: 22000
+              protocol: UDP
+              name: to-discover
+          volumeMounts:
+            - name: syncthing-persistent-storage
+              mountPath: /config
+              subPath: syncthing/config
+            - name: syncthing-persistent-storage
+              mountPath: /data1
+              subPath: syncthing/data1
+      volumes:
+        - name: syncthing-persistent-storage
+          persistentVolumeClaim:
+            claimName: main-pvc
+---

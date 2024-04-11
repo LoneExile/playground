@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: exatorrent-service
+  labels:
+    app: exatorrent
+spec:
+  selector:
+    app: exatorrent
+  ports:
+    - protocol: TCP
+      port: 5000
+      targetPort: 5000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exatorrent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: exatorrent
+  template:
+    metadata:
+      labels:
+        app: exatorrent
+    spec:
+      containers:
+        - name: exatorrent
+          image: ghcr.io/varbhat/exatorrent:latest
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          ports:
+            - containerPort: 5000
+              name: exatorrent-1
+              protocol: TCP
+            - containerPort: 42069
+              name: exatorrent-2
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /exa/exadir/cache
+              name: exatorrent-volume-nfs
+              subPath: config/exa/cache
+            - mountPath: /exa/exadir/config
+              name: exatorrent-volume-nfs
+              subPath: config/exa/config
+            
+            - mountPath: /exa/exadir/data
+              name: exatorrent-volume-nfs
+              subPath: config/exa/data
+            
+            - mountPath: /exa/exadir/torrents
+              name: exatorrent-volume-nfs
+              subPath: home/torrents
+            
+            # - mountPath: /exa/exadir
+            #   name: exatorrent-volume
+            #   subPath: exadir
+
+      volumes:
+        - name: exatorrent-volume-nfs
+          persistentVolumeClaim:
+            claimName: bob-nfs-pvc

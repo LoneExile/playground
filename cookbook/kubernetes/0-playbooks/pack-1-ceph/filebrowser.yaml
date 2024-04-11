@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+ name: main-pvc
+ namespace: default
+spec:
+ storageClassName: rook-cephfs
+ accessModes:
+   - ReadWriteMany
+ resources:
+   requests:
+     storage: 100Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: filebrowser3-service
+  labels:
+    app: filebrowser3
+spec:
+  selector:
+    app: filebrowser3
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: filebrowser3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: filebrowser3
+  template:
+    metadata:
+      labels:
+        app: filebrowser3
+    spec:
+      containers:
+        - name: filebrowser3
+          image: filebrowser/filebrowser:s6
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - mountPath: /database
+              name: filebrowser-volume
+              subPath: filebrowser/database
+
+            - mountPath: /srv
+              name: filebrowser-volume
+
+            # - mountPath: /exadir # exa
+            #   name: filebrowser-volume
+            #   subPath: exadir
+            
+      volumes:
+        - name: filebrowser-volume
+          persistentVolumeClaim:
+            claimName: main-pvc
+---
