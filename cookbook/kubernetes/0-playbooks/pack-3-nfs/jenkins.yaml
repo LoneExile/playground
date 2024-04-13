@@ -1,0 +1,164 @@
+## for test in minikube
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: code
+---
+# apiVersion: v1
+# kind: PersistentVolume
+# metadata:
+#   name: pv0001
+#   namespace: jenkins
+# spec:
+#   accessModes:
+#     - ReadWriteOnce
+#   capacity:
+#     storage: 5Gi
+#   hostPath:
+#     path: /data/pv0001/
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: bob-nfs-pvc
+  namespace: code
+spec:
+  storageClassName: nfs-client
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins-admin
+  namespace: code
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: jenkins
+  namespace: code
+  labels:
+    'app.kubernetes.io/name': 'jenkins'
+rules:
+  - apiGroups: ['']
+    resources: ['pods']
+    verbs: ['create', 'delete', 'get', 'list', 'patch', 'update', 'watch']
+  - apiGroups: ['']
+    resources: ['pods/exec']
+    verbs: ['create', 'delete', 'get', 'list', 'patch', 'update', 'watch']
+  - apiGroups: ['']
+    resources: ['pods/log']
+    verbs: ['get', 'list', 'watch']
+  - apiGroups: ['']
+    resources: ['secrets']
+    verbs: ['get']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-role-binding
+  namespace: code
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: jenkins
+subjects:
+  - kind: ServiceAccount
+    name: jenkins-admin
+    namespace: code
+---
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/service-account-token
+metadata:
+  name: token-secret
+  namespace: code
+  annotations:
+    kubernetes.io/service-account.name: jenkins-admin
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins-service
+  namespace: code
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/path: /
+    prometheus.io/port: '8080'
+spec:
+  selector:
+    app: jenkins
+  # type: NodePort
+  ports:
+    - name: httpport
+      port: 8080
+      targetPort: 8080
+      # nodePort: 32000
+    - name: jnlpport
+      port: 50000
+      targetPort: 50000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jenkins-deployment
+  namespace: code
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jenkins
+  template:
+    metadata:
+      labels:
+        app: jenkins
+    spec:
+      serviceAccountName: jenkins-admin
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+      containers:
+        - name: jenkins
+          image: jenkins/jenkins:lts
+          resources:
+            limits:
+              memory: '2Gi'
+              cpu: '1000m'
+            requests:
+              memory: '500Mi'
+              cpu: '500m'
+          ports:
+            - name: httpport
+              containerPort: 8080
+            - name: jnlpport
+              containerPort: 50000
+          livenessProbe:
+            httpGet:
+              path: '/login'
+              port: 8080
+            initialDelaySeconds: 90
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: '/login'
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: jenkins-data
+              mountPath: /var/jenkins_home
+              subPath: config/jenkins
+      volumes:
+        - name: jenkins-data
+          persistentVolumeClaim:
+            claimName: bob-nfs-pvc
+
+---

@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aria-service
+  labels:
+    app: aria
+spec:
+  selector:
+    app: aria
+  ports:
+    - protocol: TCP
+      port: 443
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aria
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aria
+  template:
+    metadata:
+      labels:
+        app: aria
+    spec:
+      containers:
+        - name: aria
+          image: hurlenko/aria2-ariang:latest
+          # securityContext:
+          #   runAsUser: 0
+          #   runAsGroup: 0
+          ports:
+            - containerPort: 8080
+              name: aria-1
+              protocol: TCP
+            - containerPort: 443
+              name: aria-2
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /aria2/data
+              name: aria-volume
+              subPath: home/download
+            - mountPath: /aria2/conf
+              name: aria-volume
+              subPath: config/ariang
+          env:
+          - name: ARIA2RPCPORT
+            value: "443"
+          - name: RPC_SECRET
+            value: ""
+          - name: BASIC_AUTH_USERNAME
+            value: ""
+          - name: BASIC_AUTH_PASSWORD
+            value: ""
+            
+
+      volumes:
+        - name: aria-volume
+          persistentVolumeClaim:
+            claimName: bob-nfs-pvc
