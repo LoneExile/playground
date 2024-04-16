@@ -8,9 +8,14 @@ spec:
   selector:
     app: aria
   ports:
-    - protocol: TCP
+    - name: aria-1
+      protocol: TCP
       port: 443
       targetPort: 8080
+    # - name: aria-2
+    #   protocol: TCP
+    #   port: 5000
+    #   targetPort: 443
 ---
 apiVersion: apps/v1
 kind: Deployment

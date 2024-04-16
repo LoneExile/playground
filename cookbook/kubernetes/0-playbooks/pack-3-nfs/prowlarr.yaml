@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: prowlarr-service
+  labels:
+    app: prowlarr
+spec:
+  selector:
+    app: prowlarr
+  ports:
+    - protocol: TCP
+      port: 9697
+      targetPort: 9696
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prowlarr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prowlarr
+  template:
+    metadata:
+      labels:
+        app: prowlarr
+    spec:
+      containers:
+        - name: prowlarr
+          # image: lscr.io/linuxserver/prowlarr:latest
+          image: ghcr.io/hotio/prowlarr
+          # securityContext:
+          #   runAsUser: 1000
+          #   runAsGroup: 1000
+          ports:
+            - containerPort: 9696
+              name: prowlarr-1
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /config
+              name: prowlarr-volume-nfs
+              subPath: config/prowlarr/config
+          env:
+            - name: TZ
+              value: "Etc/UTC"
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: UMASK
+              value: "002"
+
+      volumes:
+        - name: prowlarr-volume-nfs
+          persistentVolumeClaim:
+            claimName: bob-nfs-pvc
