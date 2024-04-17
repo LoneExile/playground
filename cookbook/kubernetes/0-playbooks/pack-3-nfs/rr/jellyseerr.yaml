@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jellyseerr-service
+  labels:
+    app: jellyseerr
+spec:
+  selector:
+    app: jellyseerr
+  ports:
+    - protocol: TCP
+      port: 5055
+      targetPort: 5055
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellyseerr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jellyseerr
+  template:
+    metadata:
+      labels:
+        app: jellyseerr
+    spec:
+      containers:
+        - name: jellyseerr
+          image: fallenbagel/jellyseerr:latest
+          # securityContext:
+          #   runAsUser: 0
+          #   runAsGroup: 0
+          ports:
+            - containerPort: 5055
+              name: jellyseerr-1
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /app/config
+              name: jellyseerr-volume-nfs
+              subPath: config/jellyseerr/config
+          env:
+            - name: TZ
+              value: "Etc/UTC"
+            - name: LOG_LEVEL
+              value: "debug"
+      volumes:
+        - name: jellyseerr-volume-nfs
+          persistentVolumeClaim:
+            claimName: bob-nfs-pvc

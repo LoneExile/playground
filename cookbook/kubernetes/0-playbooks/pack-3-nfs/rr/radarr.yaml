@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: radarr-service
+  labels:
+    app: radarr
+spec:
+  selector:
+    app: radarr
+  ports:
+    - protocol: TCP
+      port: 7878
+      targetPort: 7878
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: radarr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: radarr
+  template:
+    metadata:
+      labels:
+        app: radarr
+    spec:
+      containers:
+        - name: radarr
+          image: lscr.io/linuxserver/radarr:latest
+          # securityContext:
+          #   runAsUser: 0
+          #   runAsGroup: 0
+          ports:
+            - containerPort: 7878
+              name: radarr-1
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /config
+              name: radarr-volume-nfs
+              subPath: config/radarr/config
+            
+            - mountPath: /movie
+              name: radarr-volume-nfs
+              subPath: home/radarr/movie
+
+            - mountPath: /downloads
+              name: radarr-volume-nfs
+              subPath: home/radarr/downloads
+          env:
+            - name: TZ
+              value: "Etc/UTC"
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+      volumes:
+        - name: radarr-volume-nfs
+          persistentVolumeClaim:
+            claimName: bob-nfs-pvc
