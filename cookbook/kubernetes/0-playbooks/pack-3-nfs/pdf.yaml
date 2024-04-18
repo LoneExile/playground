@@ -42,7 +42,14 @@ spec:
             - mountPath: /configs
               name: pdf-volume-nfs
               subPath: config/pdf/configs
+          # env:
+          #   - name: PGID
+          #     value: "0"
+          #   - name: PUID
+          #     value: "0"
+
       volumes:
         - name: pdf-volume-nfs
           persistentVolumeClaim:
-            claimName: bob-nfs-pvc
+            # claimName: bob-nfs-pvc
+            claimName: nfs-pvc-worker-1

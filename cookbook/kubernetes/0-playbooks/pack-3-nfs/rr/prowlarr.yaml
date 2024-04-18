@@ -45,13 +45,14 @@ spec:
             - name: TZ
               value: "Etc/UTC"
             - name: PUID
-              value: "1000"
+              value: "0"
             - name: PGID
-              value: "1000"
+              value: "0"
             - name: UMASK
               value: "002"
 
       volumes:
         - name: prowlarr-volume-nfs
           persistentVolumeClaim:
-            claimName: bob-nfs-pvc
+            # claimName: bob-nfs-pvc
+            claimName: nfs-pvc-worker-1

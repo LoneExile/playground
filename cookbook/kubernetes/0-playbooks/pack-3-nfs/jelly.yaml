@@ -53,6 +53,7 @@ spec:
               mountPath: "/series"
               subPath: home/series
 
+            # - name: jelly-volume-nfs-1
             - name: jelly-volume-nfs
               mountPath: "/movie"
               subPath: home/movie
@@ -75,7 +76,11 @@ spec:
       volumes:
         - name: jelly-volume-nfs
           persistentVolumeClaim:
-            claimName: bob-nfs-pvc
+            # claimName: bob-nfs-pvc
+            claimName: nfs-pvc-worker-1
+        # - name: jelly-volume-nfs-1
+        #   persistentVolumeClaim:
+        #     claimName: nfs-pvc-worker-1
 
         - name: device-dri
           hostPath:

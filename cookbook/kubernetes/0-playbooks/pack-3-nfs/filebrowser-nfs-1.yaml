@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: filebrowser-service
+  name: filebrowser-service-worker-1
   labels:
-    app: filebrowser
+    app: filebrowser-worker-1
 spec:
   selector:
-    app: filebrowser
+    app: filebrowser-worker-1
   ports:
     - protocol: TCP
       port: 80
@@ -15,19 +15,19 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: filebrowser
+  name: filebrowser-worker-1
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: filebrowser
+      app: filebrowser-worker-1
   template:
     metadata:
       labels:
-        app: filebrowser
+        app: filebrowser-worker-1
     spec:
       containers:
-        - name: filebrowser
+        - name: filebrowser-worker-1
           image: filebrowser/filebrowser:s6
           securityContext:
             runAsUser: 0
@@ -37,7 +37,7 @@ spec:
           volumeMounts:
             - mountPath: /database
               name: filebrowser-volume-nfs
-              subPath: config/filebrowser/database
+              subPath: config/filebrowser1/database
             - mountPath: /srv
               name: filebrowser-volume-nfs
               # subPath: srv
@@ -49,4 +49,4 @@ spec:
       volumes:
         - name: filebrowser-volume-nfs
           persistentVolumeClaim:
-            claimName: bob-nfs-pvc
+            claimName: nfs-pvc-worker-1

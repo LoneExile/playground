@@ -44,10 +44,17 @@ spec:
             - name: syncthing-persistent-storage-nfs
               mountPath: "/data2"
               subPath: home/syncthing/data2
+          env:
+            - name: PGID
+              value: "1000"
+            - name: PUID
+              value: "1000"
+
       volumes:
         - name: syncthing-persistent-storage-nfs
           persistentVolumeClaim:
-            claimName: bob-nfs-pvc
+            # claimName: bob-nfs-pvc
+            claimName: nfs-pvc-worker-1
 ---
 apiVersion: v1
 kind: Service

@@ -45,7 +45,8 @@ spec:
       volumes:
         - name: dashy-volume-nfs
           persistentVolumeClaim:
-            claimName: bob-nfs-pvc
+            # claimName: bob-nfs-pvc
+            claimName: nfs-pvc-worker-1
         # - name: config
         #   configMap:
         #     name: dashy

@@ -51,4 +51,5 @@ spec:
       volumes:
         - name: sonarr-volume-nfs
           persistentVolumeClaim:
-            claimName: bob-nfs-pvc
+            # claimName: bob-nfs-pvc
+            claimName: nfs-pvc-worker-1
