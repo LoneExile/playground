@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nfs-pvc-worker-1
+spec:
+  storageClassName: nfs-client-worker-1
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 60Gi
