@@ -102,6 +102,11 @@ lsblk -f
 # sudo rm -rf /mnt/cephfs
 # sudo rm -rf /var/lib/rook
 
+## armbian expand filesystem
+# first remove partition with `sudo fdisk /dev/<root-disk>`
+sudo systemctl enable armbian-resize-filesystem # or start? w/o reboot
+sudo reboot
+
 ```
 
 ### Adding an OSD
