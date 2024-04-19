@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: code-server-service
+  labels:
+    app: code-server
+spec:
+  selector:
+    app: code-server
+  ports:
+    - protocol: TCP
+      port: 8443
+      targetPort: 8443
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: code-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: code-server
+  template:
+    metadata:
+      labels:
+        app: code-server
+    spec:
+      containers:
+        - name: code-server
+          image: lscr.io/linuxserver/code-server:latest
+          ports:
+            - containerPort: 8443
+          volumeMounts:
+            - mountPath: /config
+              name: code-server-volume-nfs
+              subPath: config/code-server/config
+          env:
+          - name: PGID
+            value: "1000"
+          - name: PUID
+            value: "1000"
+          - name: TZ
+            value: "Etc/UTC"
+          - name: PASSWORD
+            value: "password"
+          - name: SUDO_PASSWORD
+            value: "password"
+          # - name: HASHED_PASSWORD
+          #   value: ""
+          # - name: SUDO_PASSWORD_HASH
+          #   value: ""
+          - name: PROXY_DOMAIN
+            value: "code.voidbox.io"
+          - name: DEFAULT_WORKSPACE
+            value: "/config/workspace"
+      volumes:
+        - name: code-server-volume-nfs
+          persistentVolumeClaim:
+            claimName: nfs-pvc-worker-1

@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: affine-service
+  labels:
+    app: affine
+spec:
+  ports:
+    - name: affine-service-1
+      port: 3010
+      targetPort: 3010
+      protocol: TCP
+
+    - protocol: TCP
+      port: 5555
+      targetPort: 5555
+      name: affine-service-2
+
+  selector:
+    app: affine
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: affine
+  labels:
+    app: affine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: affine
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: affine
+    spec:
+      containers:
+        - image: ghcr.io/toeverything/affine-graphql:stable
+          command:
+            - bash
+            - -c
+            - |
+             node ./scripts/self-host-predeploy && node ./dist/index.js
+          name: affine
+          ports:
+            - containerPort: 3010
+              name: affine-1
+              protocol: TCP
+            - containerPort: 5555
+              protocol: TCP
+              name: affine-2
+          volumeMounts:
+            - name: affine-persistent-storage-nfs
+              mountPath: /root/.affine/config
+              subPath: home/affine/config
+
+            - name: affine-persistent-storage-nfs
+              mountPath: /root/.affine/storage
+              subPath: home/affine/storage
+          env:
+          - name: NODE_OPTIONS
+            value: "--import=./scripts/register.js"
+          - name: AFFINE_CONFIG_PATH
+            value: "/root/.affine/config"
+          - name: REDIS_SERVER_HOST
+            value: "affine-redis"
+          - name: DATABASE_URL
+            value: "postgres://affine:affine@affine-postgres:5432/affine"
+          - name: NODE_ENV
+            value: "production"
+          - name: AFFINE_ADMIN_EMAIL
+            value: "affine@acme.sh"
+          - name: AFFINE_ADMIN_PASSWORD
+            value: "affine"
+          - name: TELEMETRY_ENABLE
+            value: "false"
+      volumes:
+        - name: affine-persistent-storage-nfs
+          persistentVolumeClaim:
+            claimName: nfs-pvc-worker-1
+---
