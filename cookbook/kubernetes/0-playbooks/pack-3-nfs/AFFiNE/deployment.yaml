@@ -71,10 +71,14 @@ spec:
             value: "postgres://affine:affine@affine-postgres:5432/affine"
           - name: NODE_ENV
             value: "production"
+          - name: AFFINE_SERVER_HOST
+            value: "affine.voidbox.io"
+          - name: AFFINE_SERVER_HTTPS
+            value: "true"
           - name: AFFINE_ADMIN_EMAIL
-            value: "affine@acme.sh"
+            value: ""
           - name: AFFINE_ADMIN_PASSWORD
-            value: "affine"
+            value: ""
           - name: TELEMETRY_ENABLE
             value: "false"
       volumes:
