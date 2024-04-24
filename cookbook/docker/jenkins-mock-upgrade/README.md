@@ -3,9 +3,9 @@
 ## Initial Setup
 
 ```bash
-service jenkins start
+service jenkins start && ufw allow 8080
 
-sudo ufw allow 8080
+cat /var/log/jenkins/jenkins.log
 ```
 
 ## Upgrading Jenkins
@@ -23,4 +23,10 @@ mv jenkins.war jenkins.war.old
 wget https://updates.jenkins.io/download/war/{version}/jenkins.war
 
 service jenkins start
+```
+
+or use update.sh
+
+```bash
+./update.sh 2.442
 ```
