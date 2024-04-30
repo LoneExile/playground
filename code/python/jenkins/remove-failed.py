@@ -26,7 +26,7 @@ def delete_failed_builds(server):
                     job_instance.delete_build(build_number)
                     print(f"Deleted build {build_number} from job {job_name}")
                     failed_builds_deleted = True
-            if job_name in skipBranch:
+            if job_instance.name in skipBranch:
                 print(f"Skipping job: {job_name}")
                 continue
             if failed_builds_deleted:
