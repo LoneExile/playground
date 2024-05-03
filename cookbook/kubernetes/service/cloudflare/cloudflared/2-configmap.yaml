@@ -11,8 +11,8 @@ data:
     metrics: 0.0.0.0:2000
     no-autoupdate: true
     ingress:
-    - hostname: tunnel.<URL>.io
-      service: http://nginx.default.svc.cluster.local:80
-    - hostname: grafana.<URL>.io
-      service: http://grafana.monitoring.svc.cluster.local:80
+    - hostname: jenkins.apinant.dev
+      service: http://jenkins-service.jenkins.svc.cluster.local:8080
+    - hostname: sonar.apinant.dev
+      service: http://sonar-svc.sonar.svc.cluster.local:9000
     - service: http_status:404
