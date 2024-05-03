@@ -69,13 +69,19 @@ spec:
             # https://github.com/moby/buildkit/issues/879#issuecomment-1240347038
             - mountPath: /home/user/.local/share/buildkit
               name: buildkitd
+              subPath: buildkit
       volumes:
         # buildkit-daemon-certs must contain ca.pem, cert.pem, and key.pem
         - name: certs
           secret:
             secretName: buildkit-daemon-certs
+        # - name: buildkitd
+        #   emptyDir: {}
+
+        ## Cache buildkit data in a persistent volume
         - name: buildkitd
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: bob-nfs-pvc
 ---
 apiVersion: v1
 kind: Service
