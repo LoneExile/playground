@@ -1,2 +1,2 @@
 FROM docker:26.1.1-cli-alpine3.19
-RUN apk --no-cache add make
+RUN apk --no-cache add make git
