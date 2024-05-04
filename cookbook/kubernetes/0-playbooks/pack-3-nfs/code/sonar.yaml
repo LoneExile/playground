@@ -115,6 +115,13 @@ spec:
       containers:
       - name: sonarqube
         image: bitnami/sonarqube:10.4.0
+        resources:
+          requests:
+            memory: "1Gi"
+            # cpu: "250m"
+          limits:
+            memory: "4Gi"
+            # cpu: "500m"
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9000
@@ -128,11 +135,6 @@ spec:
         - name: app-pvc
           mountPath: "/opt/sonarqube/extensions/"
           subPath: config/sonarqube/extensions
-        resources:
-          requests:
-            memory: "1024Mi"
-          limits:
-            memory: "2048Mi"
       volumes:
       - name: app-pvc
         persistentVolumeClaim:
