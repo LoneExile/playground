@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubectl-pod
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: deployment-restart-clusterrole
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: deployment-restart-clusterbinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: deployment-restart-clusterrole
+subjects:
+- kind: ServiceAccount
+  name: kubectl-pod
+  # namespace: default
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kubectl-pod
+spec:
+  serviceAccountName: kubectl-pod
+  containers:
+  - name: kubectl-container
+    image: bitnami/kubectl
+    command: ["sleep"]
+    args: ["infinity"]

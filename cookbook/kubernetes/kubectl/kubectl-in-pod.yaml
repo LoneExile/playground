@@ -14,7 +14,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kubectl-pod
-  namespace: default
+  # namespace: default
 ---
 apiVersion: v1
 kind: Pod
