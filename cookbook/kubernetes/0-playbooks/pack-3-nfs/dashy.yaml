@@ -10,7 +10,7 @@ spec:
   ports:
     - protocol: TCP
       port: 4000
-      targetPort: 80
+      targetPort: 8080
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -30,13 +30,13 @@ spec:
         - name: dashy
           image: lissy93/dashy:latest
           ports:
-            - containerPort: 80
+            - containerPort: 8080
               name: dashy-1
               protocol: TCP
           volumeMounts:
-            - mountPath: /app/public/
+            - mountPath: /app/user-data
               name: dashy-volume-nfs
-              subPath: config/dashy/config
+              subPath: config/dashy/user-data
             # - name: config
             #   mountPath: /app/public/conf.yml
             #   subPath: config/dashy/conf.yml
