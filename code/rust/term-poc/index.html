@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Xterm.js with Rust Backend</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm/css/xterm.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm/lib/xterm.js"></script>
+</head>
+<body>
+    <div id="terminal" style="width: 100%; height: 100%;"></div>
+    <script>
+        const term = new Terminal({
+            cursorBlink: true
+        });
+        term.open(document.getElementById('terminal'));
+
+        const socket = new WebSocket('ws://127.0.0.1:8080');
+
+        socket.onopen = () => {
+            term.write('Connected to the server.\r\n');
+            term.focus();
+
+          const initialSize = {cols: term.cols, rows: term.rows};
+          const initialMsg = JSON.stringify({type: 'resize', cols: initialSize.cols, rows: initialSize.rows});
+          socket.send(initialMsg);
+        };
+
+        socket.onmessage = (event) => {
+            term.write(event.data);
+        };
+
+        socket.onclose = () => {
+            term.write('\r\nConnection closed.\r\n');
+        };
+
+        term.onResize({
+          cols: term.cols,
+          rows: term.rows
+        });
+
+        term.onData(data => {
+            socket.send(data);
+        });
+    </script>
+</body>
+</html>
