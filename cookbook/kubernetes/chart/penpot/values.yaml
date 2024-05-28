@@ -1,0 +1,25 @@
+# Default values for the chart
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+image:
+  - name: frontend
+    repository: penpotapp/frontend
+    pullPolicy: Always
+    tag: latest
+    digest: ""
+  - name: backend
+    repository: penpotapp/backend
+    pullPolicy: Always
+    tag: latest
+    digest: ""
+service:
+  - name: frontend
+    type: ClusterIP
+    port: 9001
+    targetPort: 80
+  - name: backend
+    type: "ClusterIP"
+    # port: 9001
+    # targetPort: 80
