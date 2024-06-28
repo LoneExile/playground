@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cobalt-api-service
+  labels:
+    app: cobalt-api
+spec:
+  selector:
+    app: cobalt-api
+  ports:
+    - protocol: TCP
+      port: 9000
+      targetPort: 9000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cobalt-api-deployment
+  labels:
+    app: cobalt-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cobalt-api
+  template:
+    metadata:
+      labels:
+        app: cobalt-api
+    spec:
+      containers:
+        - name: cobalt-api
+          image: ghcr.io/imputnet/cobalt:7
+          ports:
+            - containerPort: 9000
+          env:
+          - name: API_URL
+            value: "http://cobalt-api-service:3000"
+          - name: API_NAME
+            value: "asia-sg"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cobalt-web-service
+  labels:
+    app: cobalt-web
+spec:
+  selector:
+    app: cobalt-web
+  ports:
+    - protocol: TCP
+      port: 9001
+      targetPort: 9001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cobalt-web-deployment
+  labels:
+    app: cobalt-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cobalt-web
+  template:
+    metadata:
+      labels:
+        app: cobalt-web
+    spec:
+      containers:
+        - name: cobalt-web
+          image: ghcr.io/imputnet/cobalt:7
+          ports:
+            - containerPort: 9001
+          env:
+          - name: WEB_URL
+            value: "http://cobalt.voidbox.io"
+          - name: API_URL
+            value: "http://cobalt-api-service:3000"
