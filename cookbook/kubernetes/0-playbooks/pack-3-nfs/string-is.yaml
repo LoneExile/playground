@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: string-service
+  labels:
+    app: string
+spec:
+  selector:
+    app: string
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: string-deployment
+  labels:
+    app: string
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: string
+  template:
+    metadata:
+      labels:
+        app: string
+    spec:
+      containers:
+        - name: string
+          image: daveperrett/string-is:latest
+          ports:
+            - containerPort: 3000
