@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: searxng-service
+  labels:
+    app: searxng
+spec:
+  selector:
+    app: searxng
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: searxng-deployment
+  labels:
+    app: searxng
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: searxng
+  template:
+    metadata:
+      labels:
+        app: searxng
+    spec:
+      containers:
+        - name: searxng
+          image: searxng/searxng
+          ports:
+            - containerPort: 8080
+          env:
+          - name: BASE_URL
+            value: "http://searxng-service:8080"
+          - name: BASE_URL_PATH
+            value: "searxng-service"
