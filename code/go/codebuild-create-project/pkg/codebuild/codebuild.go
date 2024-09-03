@@ -5,14 +5,100 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+
+	// "github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/codebuild"
 	"github.com/aws/aws-sdk-go-v2/service/codebuild/types"
 )
 
 var conf = gconf.LoadConfig()
+
+func UpdateCodeBuildConfig() {
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	// cfg, err := config.LoadDefaultConfig(context.TODO(),
+	// 	config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("", "", "")),
+	// 	config.WithRegion("ap-southeast-1"),
+	// )
+	if err != nil {
+		log.Fatalf("Unable to load SDK config: %v", err)
+	}
+
+	svc := codebuild.NewFromConfig(cfg)
+
+	if svc == nil {
+		log.Fatalf("Unable to create Codebuild service")
+	}
+	projects, err := ListAllCodeBuildProjects(svc)
+	if err != nil {
+		log.Fatalf("Unable to list Codebuild projects")
+	}
+	fmt.Println(projects)
+	for _, project := range projects {
+		UpdateOrAddProjectTag(svc, project, conf.Tag)
+	}
+}
+
+func separateTag(tag string) (string, string, error) {
+	parts := strings.Split(tag, ":")
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid tag format")
+	}
+	return parts[0], parts[1], nil
+}
+
+func UpdateOrAddProjectTag(svc *codebuild.Client, projectName string, tag string) {
+	tagKey, tagValue, err := separateTag(tag)
+	if err != nil {
+		log.Fatalf("Failed to separate tag: %v", err)
+	}
+
+	input := &codebuild.UpdateProjectInput{
+		Name: &projectName,
+		Tags: []types.Tag{
+			{
+				Key:   aws.String("Name"),
+				Value: aws.String(projectName),
+			},
+			{
+				Key:   aws.String(tagKey),
+				Value: aws.String(tagValue),
+			},
+		},
+	}
+
+	_, err = svc.UpdateProject(context.TODO(), input)
+	if err != nil {
+		log.Fatalf("Failed to update project tags: %v", err)
+	}
+
+	fmt.Printf("Successfully updated/added tag 'name:%s' to project '%s'\n", projectName, projectName)
+}
+
+func ListAllCodeBuildProjects(svc *codebuild.Client) ([]string, error) {
+	var projects []string
+
+	input := &codebuild.ListProjectsInput{}
+
+	for {
+		result, err := svc.ListProjects(context.TODO(), input)
+		if err != nil {
+			return nil, err
+		}
+
+		projects = append(projects, result.Projects...)
+
+		if result.NextToken == nil {
+			break
+		}
+		input.NextToken = result.NextToken
+	}
+
+	return projects, nil
+}
 
 func Codebuild(projects [][]string) {
 	cfg, err := config.LoadDefaultConfig(context.TODO())

@@ -38,6 +38,7 @@ import (
 // 	}
 
 // 	codebuild.Codebuild(allRepoNames)
+// codebuild.UpdateCodeBuildConfig()
 // }
 
 func main() {
@@ -76,6 +77,7 @@ func handler(request events.APIGatewayProxyRequest) (events.APIGatewayProxyRespo
 	}
 
 	codebuild.Codebuild(allRepoNames)
+	// codebuild.UpdateCodeBuildConfig()
 
 	return events.APIGatewayProxyResponse{
 		Body:       "Success\n",

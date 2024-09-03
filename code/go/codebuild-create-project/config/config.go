@@ -16,6 +16,7 @@ type Config struct {
 	ComputeType     string
 	Image           string
 	CleanUp         string
+	Tag             string
 }
 
 func LoadConfig() *Config {
@@ -31,5 +32,6 @@ func LoadConfig() *Config {
 		ComputeType:     os.Getenv("COMPUTE_TYPE"),
 		Image:           os.Getenv("IMAGE"),
 		CleanUp:         os.Getenv("CLEAN_UP"),
+		// Tag:            os.Getenv("TAG"),
 	}
 }
