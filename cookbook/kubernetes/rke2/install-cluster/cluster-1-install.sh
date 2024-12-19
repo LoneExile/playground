@@ -1,3 +1,16 @@
+#!/bin/bash
+
+KUBE_VIP_IP="192.168.1.200"
+KUBE_VIP_NAME="master"
+KUBE_VIP_CIDR_RANGE="192.168.1.201-192.168.1.209"
+BASHRC_FILE="/root/.bashrc"
+CILIUM_ID="1"
+
+CLOUDFLARE_API_TOKEN=""
+CLOUDFLARE_API_TOKEN_BASE64=$(echo -n "$CLOUDFLARE_API_TOKEN" | base64)
+ACME_EMAIL="me@apinant.dev"
+DOMAIN="voidbox.io"
+
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 # Install RKE2 with Cilium as CNI
@@ -11,7 +24,7 @@ cat <<EOF >/etc/rancher/rke2/config.yaml
 cni: none
 tls-san:
   - $(hostname)
-  - $(hostname -i)
+  #- $(hostname -i)
   - master
 write-kubeconfig-mode: 0644
 disable:
@@ -19,44 +32,122 @@ disable:
 disable-kube-proxy: "true"
 EOF
 
+cat <<EOF >>/etc/hosts
+$KUBE_VIP_IP $KUBE_VIP_NAME
+EOF
+chattr +i /etc/hosts
+
 # Start RKE2
 systemctl start rke2-server.service
-sleep 69
+sleep 169
+
+cat <<EOF >>~/.bashrc
+export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
+export PATH=\${PATH}:/var/lib/rancher/rke2/bin
+source <(kubectl completion bash)
+alias k=kubectl
+complete -o default -F __start_kubectl k
+if [ -f /etc/bash_completion ] && ! shopt -oq posix; then
+    . /etc/bash_completion
+fi
+EOF
+
+# shellcheck disable=SC1090
+source "$BASHRC_FILE"
+
+KUBECONFIG=~/.kube/config kubectl get nodes -o wide
 
 helm repo add cilium https://helm.cilium.io/
 #helm install cilium cilium/cilium --namespace=kube-system
 
-helm install cilium cilium/cilium \
-  --namespace kube-system \
-  --set kubeProxyReplacement=true --set k8sServiceHost=ubuntu-2 \
-  --set k8sServicePort=6443 \
-  --set cni.chainingMode=none
+# `kubeProxyReplacement=true` This enables Cilium to completely replace kube-proxy functionality
+# `cni.chainingMode=none` Ensures Cilium has complete control over network configuration
+
+# helm install cilium cilium/cilium \
+#   --namespace kube-system \
+#   --set kubeProxyReplacement=true --set k8sServiceHost=ubuntu-1 \
+#   --set k8sServicePort=6443 \
+#   --set cni.chainingMode=none
+
+cat <<EOF >/root/cilium-values.yaml
+kubeProxyReplacement: true
+k8sServiceHost: $KUBE_VIP_NAME
+k8sServicePort: 6443
+cni:
+  chainingMode: none
+clustermesh:
+  useAPIServer: true
+  apiServer:
+    service:
+      type: LoadBalancer
+cluster:
+  name: $(hostname)
+  id: $CILIUM_ID
+hubble:
+  enabled: true
+  ui:
+    enabled: true
+  metrics:
+    enabled:
+      - dns
+      - drop
+      - tcp
+      - flow
+      - icmp
+      - http
+  relay:
+    enabled: true
+EOF
+
+helm install cilium cilium/cilium --namespace kube-system --values cilium-values.yaml
+# helm upgrade cilium cilium/cilium --namespace kube-system --values cilium-values.yaml
 
 # mkdir -p $HOME/.kube
 # export VIP=$(hostname -I | cut -d' ' -f1)
 # sudo cat /etc/rancher/rke2/rke2.yaml | sed 's/127.0.0.1/'$VIP'/g' >$HOME/.kube/config
 # sudo chown $(id -u):$(id -g) $HOME/.kube/config
 
-echo 'export KUBECONFIG=/etc/rancher/rke2/rke2.yaml' >>~/.bashrc
-echo 'export PATH=${PATH}:/var/lib/rancher/rke2/bin' >>~/.bashrc
-echo "source <(kubectl completion bash)" >>~/.bashrc
-echo 'alias k=kubectl' >>~/.bashrc
-echo 'complete -o default -F __start_kubectl k' >>~/.bashrc
-source ~/.bashrc
-
-KUBECONFIG=~/.kube/config kubectl get nodes -o wide
-
 cat <<EOF >/root/kube-vip-value.yaml
 config:
-  address: 192.168.1.200
+  address: "$KUBE_VIP_IP"
 env:
   vip_interface: "eth0"
+  vip_cidr: "32"
+  dns_mode: "first"
+  cp_enable: "true"
+  cp_namespace: "kube-system"
+  svc_enable: "true"
+  svc_leasename: "plndr-svcs-lock"
+  vip_leaderelection: "true"
+  vip_leasename: "plndr-cp-lock"
+  vip_leaseduration: "5"
+  vip_renewdeadline: "3"
+  vip_retryperiod: "1"
+  prometheus_server: ":2112"
+
+  vip_arp: "true"
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+      - matchExpressions:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+
+tolerations:
+  - effect: NoSchedule
+    operator: Exists
+  - effect: NoExecute
+    operator: Exists
 EOF
 
 cat <<EOF >/root/cloud-provider-values.yaml
 cm:
   data:
-    cidr-global: "192.168.1.201-192.168.1.209"
+    cidr-global: $KUBE_VIP_CIDR_RANGE
     # cidr-default: "192.168.1.201-192.168.1.209" # for default ns
 EOF
 
@@ -68,6 +159,19 @@ helm install kube-vip-cloud-provider kube-vip/kube-vip-cloud-provider --namespac
 
 sleep 30
 
+# NOTE: add this before
+# `vim /etc/hosts`
+# 192.168.1.200 master
+
+mkdir -p "$HOME/.kube"
+export VIP=192.168.1.206
+sudo cat /etc/rancher/rke2/rke2.yaml | sed 's/127.0.0.1/'$VIP'/g' >"$HOME/.kube/config"
+sudo chown "$(id -u)":"$(id -g)" "$HOME/.kube/config"
+
+KUBECONFIG=~/.kube/config kubectl get nodes -o wide
+
+###
+
 kubectl create ns test
 kubectl create deployment nginx --image=nginx -n test
 kubectl expose deployment nginx --name=nginx-lb --port=80 --type=LoadBalancer -n test
@@ -75,8 +179,8 @@ kubectl get svc -n test
 # kubectl delete svc nginx-lb -n test
 # kubectl delete deployment nginx -n test
 
-kubectl create deployment nginx --image=nginx
-kubectl expose deployment nginx --name=nginx-lb --port=80 --type=LoadBalancer
+# kubectl create deployment nginx --image=nginx
+# kubectl expose deployment nginx --name=nginx-lb --port=80 --type=LoadBalancer
 # kubectl delete svc nginx-lb
 # kubectl delete deployment nginx
 
@@ -93,62 +197,62 @@ ingressRoute:
     entryPoints:
       - web
       - websecure
-    match: Host(\`traefik.home.voidbox.io\`)
+    match: Host(\`traefik.$DOMAIN\`)
 EOF
 
 helm install traefik traefik/traefik --namespace traefik --create-namespace --values traefik-values.yaml
 # helm upgrade traefik traefik/traefik --namespace traefik --values traefik-values.yaml
 
-# curl -k -H "Host: traefik.voidbox.io" $(kubectl get svc traefik -n traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+# curl -k -H "Host: traefik.$DOMAIN" $(kubectl get svc traefik -n traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 
-# ingress
-cat <<EOF >/root/ingress.yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: nginx-ingress
-  namespace: test
-  annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure
-spec:
-  rules:
-  - host: nginx.voidbox.io
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: nginx-lb
-            port:
-              number: 80
-EOF
+# # ingress
+# cat <<EOF >/root/ingress.yaml
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: nginx-ingress
+#   namespace: test
+#   annotations:
+#     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+# spec:
+#   rules:
+#   - host: nginx.$DOMAIN
+#     http:
+#       paths:
+#       - path: /
+#         pathType: Prefix
+#         backend:
+#           service:
+#             name: nginx-lb
+#             port:
+#               number: 80
+# EOF
 
-kubectl apply -f ingress.yaml
-curl -k -H "Host: nginx.voidbox.io" $(kubectl get svc traefik -n traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-kubectl delete -f ingress.yaml
+# kubectl apply -f ingress.yaml
+# curl -k -H "Host: nginx.$DOMAIN" $(kubectl get svc traefik -n traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+# kubectl delete -f ingress.yaml
 
 # ingressRoute
-cat <<EOF >/root/ingressroute.yaml
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: nginx-ingress
-  namespace: test
-spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(\`nginx.voidbox.io\`)
-      kind: Rule
-      services:
-        - name: nginx-lb
-          port: 80
-EOF
+# cat <<EOF >/root/ingressroute.yaml
+# apiVersion: traefik.io/v1alpha1
+# kind: IngressRoute
+# metadata:
+#   name: nginx-ingress
+#   namespace: test
+# spec:
+#   entryPoints:
+#     - websecure
+#   routes:
+#     - match: Host(\`nginx.$DOMAIN\`)
+#       kind: Rule
+#       services:
+#         - name: nginx-lb
+#           port: 80
+# EOF
 
-kubectl apply -f ingressroute.yaml
-curl -k -H "Host: nginx.voidbox.io" $(kubectl get svc traefik -n traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-kubectl delete -f ingressroute.yaml
+# kubectl apply -f ingressroute.yaml
+# curl -k -H "Host: nginx.$DOMAIN" $(kubectl get svc traefik -n traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+# kubectl delete -f ingressroute.yaml
 
 helm repo add jetstack https://charts.jetstack.io --force-update
 
@@ -172,8 +276,7 @@ metadata:
   namespace: cert-manager
 type: Opaque
 data:
-  ## echo -n "<API Token>" | base64
-  api-token: <API Token>
+  api-token: $CLOUDFLARE_API_TOKEN_BASE64
 EOF
 
 kubectl apply -f cloudflare-api-token-secret.yaml
@@ -188,7 +291,7 @@ metadata:
   name: cloudflare-cluster-issuer
 spec:
   acme:
-    email: me@apinant.dev
+    email: $ACME_EMAIL
     # server: https://acme-staging-v02.api.letsencrypt.org/directory
     server: https://acme-v02.api.letsencrypt.org/directory
     privateKeySecretRef:
@@ -217,7 +320,7 @@ spec:
     name: cloudflare-cluster-issuer
     kind: ClusterIssuer
   dnsNames:
-    - nginx.voidbox.io
+    - nginx.$DOMAIN
 EOF
 
 kubectl apply -f nginx-cert.yaml
@@ -233,7 +336,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(\`nginx.voidbox.io\`)
+    - match: Host(\`nginx.$DOMAIN\`)
       kind: Rule
       services:
         - name: nginx-lb
@@ -247,10 +350,10 @@ kubectl apply -f ingressroute-tls.yaml
 kubectl get certificate -n test
 
 # `vim /etc/hosts`
-# 192.168.1.203 nginx.voidbox.io
+# 192.168.1.203 nginx.$DOMAIN
 
 sleep 80
-curl -v https://nginx.voidbox.io
+curl -v https://nginx.$DOMAIN
 
 ## https://cert-manager.io/docs/troubleshooting/#troubleshooting-a-failed-certificate-request
 
@@ -267,7 +370,7 @@ spec:
     name: cloudflare-cluster-issuer
     kind: ClusterIssuer
   dnsNames:
-    - traefik.home.voidbox.io
+    - traefik.home.$DOMAIN
 EOF
 
 kubectl apply -f traefik-cert.yaml
@@ -283,9 +386,13 @@ ingressRoute:
     entryPoints:
       - web
       - websecure
-    match: Host(\`traefik.home.voidbox.io\`)
+    match: Host(\`traefik.home.$DOMAIN\`)
     tls:
       secretName: traefik-cert-secret
 EOF
 
 helm upgrade traefik traefik/traefik --namespace traefik --values traefik-values.yaml
+
+####
+
+# kubectl label node ubuntu-3 node-role.kubernetes.io/worker=worker
