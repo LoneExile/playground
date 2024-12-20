@@ -24,7 +24,8 @@ cat <<EOF >/etc/rancher/rke2/config.yaml
 cni: none
 tls-san:
   - $(hostname)
-  #- $(hostname -i)
+  - $(hostname -I | cut -d' ' -f1)
+  - $KUBE_VIP_IP
   - master
 write-kubeconfig-mode: 0644
 disable:
@@ -32,8 +33,10 @@ disable:
 disable-kube-proxy: "true"
 EOF
 
+chattr -i /etc/hosts
 cat <<EOF >>/etc/hosts
 $KUBE_VIP_IP $KUBE_VIP_NAME
+$(hostname -I | cut -d' ' -f1) $(hostname)
 EOF
 chattr +i /etc/hosts
 
@@ -71,7 +74,8 @@ helm repo add cilium https://helm.cilium.io/
 
 cat <<EOF >/root/cilium-values.yaml
 kubeProxyReplacement: true
-k8sServiceHost: $KUBE_VIP_NAME
+# k8sServiceHost: $KUBE_VIP_NAME
+k8sServiceHost: $(hostname)
 k8sServicePort: 6443
 cni:
   chainingMode: none
@@ -164,7 +168,7 @@ sleep 30
 # 192.168.1.200 master
 
 mkdir -p "$HOME/.kube"
-export VIP=192.168.1.206
+export VIP=$KUBE_VIP_IP
 sudo cat /etc/rancher/rke2/rke2.yaml | sed 's/127.0.0.1/'$VIP'/g' >"$HOME/.kube/config"
 sudo chown "$(id -u)":"$(id -g)" "$HOME/.kube/config"
 

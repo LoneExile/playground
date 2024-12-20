@@ -25,7 +25,8 @@ server: https://$KUBE_VIP_NAME:9345
 cni: none
 tls-san:
   - $(hostname)
-  #- $(hostname -i)
+  - $(hostname -I | cut -d' ' -f1)
+  - $KUBE_VIP_IP
   - master
 write-kubeconfig-mode: 0644
 disable:
@@ -33,8 +34,11 @@ disable:
 disable-kube-proxy: "true"
 EOF
 
+## TODO: fix this
 cat <<EOF >>/etc/hosts
 $KUBE_VIP_IP $KUBE_VIP_NAME
+$(hostname -I | cut -d' ' -f1) $(hostname)
+192.168.1.214 master01
 EOF
 chattr +i /etc/hosts
 
