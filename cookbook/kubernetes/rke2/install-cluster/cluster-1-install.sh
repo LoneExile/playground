@@ -28,6 +28,7 @@ tls-san:
   - $KUBE_VIP_IP
   - master
 write-kubeconfig-mode: 0644
+etcd-expose-metrics: true
 disable:
   - rke2-ingress-nginx
 disable-kube-proxy: "true"
@@ -47,6 +48,8 @@ sleep 169
 cat <<EOF >>~/.bashrc
 export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
 export PATH=\${PATH}:/var/lib/rancher/rke2/bin
+export CONTAINER_RUNTIME_ENDPOINT=unix:///run/k3s/containerd/containerd.sock
+export CONTAINERD_ADDRESS=/run/k3s/containerd/containerd.sock
 source <(kubectl completion bash)
 alias k=kubectl
 complete -o default -F __start_kubectl k
