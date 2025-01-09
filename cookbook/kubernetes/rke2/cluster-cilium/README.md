@@ -1,19 +1,36 @@
 # Cluster Mesh
 
+https://docs.cilium.io/en/stable/network/clustermesh/clustermesh/
+
 ```bash
 # copy .kube/config from each node to the local machine
 # let's name as node1, node2
 # vim ndoe1 > s/default/node1/g
 # vim node2 > s/default/node2/g
 
-export KUBECONFIG=~/root/node1.yaml:/root/node2.yaml
+export CLUSTER1=node1
+export CLUSTER2=node2
+
+export KUBECONFIG=/root/node1.yaml:/root/node2.yaml
 kubectl config view --flatten > ~/.kube/merged_config
 mv ~/.kube/config ~/.kube/config.bak
 mv ~/.kube/merged_config ~/.kube/config
 
+kubectl --context=$CLUSTER1 get secret -n kube-system cilium-ca -o yaml | \
+  kubectl --context $CLUSTER2 create -f -
+
 cilium clustermesh connect \
-  --context node1 \
-  --destination-context node2
+  --context $CLUSTER1 \
+  --destination-context $CLUSTER2
+
+## change the service type to LoadBalancer
+# k edit svc -n kube-system clustermesh-apiserver
+
+cilium clustermesh status --context $CLUSTER1 --wait
+
+cilium connectivity test --context $CLUSTER1 --multi-cluster $CLUSTER2
+
+# cilium clustermesh disconnect
 ```
 
 ```yaml

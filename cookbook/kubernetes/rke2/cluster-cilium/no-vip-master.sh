@@ -79,6 +79,8 @@ cni:
 clustermesh:
   useAPIServer: true
   apiServer:
+    kvstoremesh:
+      enabled: true
     service:
       type: LoadBalancer
 cluster:
