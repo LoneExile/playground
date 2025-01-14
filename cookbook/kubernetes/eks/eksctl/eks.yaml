@@ -1,0 +1,26 @@
+
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: my-eks-cluster
+  region: ap-southeast-1
+managedNodeGroups:
+- name: al-nodes
+  instanceType: t3.medium
+  desiredCapacity: 2
+  minSize: 1
+  maxSize: 2
+  # privateNetworking: true
+  taints:
+   - key: "node.cilium.io/agent-not-ready"
+     value: "true"
+     effect: "NoExecute"
+  ssh:
+    allow: true
+    publicKeyName: your-key-pair2
+  maxPodsPerNode: 110
+  subnets:
+    - subnet-02e9782a32d96b9eb
+    - subnet-0e864ce562d8d7c81
+    - subnet-0dae34501f8b92150

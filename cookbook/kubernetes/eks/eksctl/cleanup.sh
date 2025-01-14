@@ -3,9 +3,28 @@
 export AWS_PROFILE=apinant
 REGION=ap-southeast-1
 VPC_CIDR="10.0.0.0/16"
+NODE_GROUP_NAME="al-nodes"
 CLUSTER_NAME="my-eks-cluster"
 EKS_VERSION="1.31"
 VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=eks-vpc" --query "Vpcs[0].VpcId" --output text)
+
+
+cleanup_nodegroup() {
+    echo "Deleting nodegroup: $NODE_GROUP_NAME"
+    eksctl delete nodegroup \
+        --cluster $CLUSTER_NAME \
+        --name $NODE_GROUP_NAME \
+        --region $REGION
+
+    # Wait for nodegroup to be fully deleted
+    echo "Waiting for nodegroup to be deleted..."
+    until ! eksctl get nodegroup --cluster $CLUSTER_NAME --name $NODE_GROUP_NAME --region $REGION 2>/dev/null; do
+        echo "Nodegroup is still being deleted..."
+        sleep 30
+    done
+    echo "Nodegroup deleted successfully!"
+}
+
 
 # Function to cleanup EKS cluster
 cleanup_eks_cluster() {

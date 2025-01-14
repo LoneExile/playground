@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: busy
+  name: busy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: busy
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: busy
+    spec:
+      nodeSelector:
+        deploymentGroup: deploymentGroup2
+      containers:
+      - command:
+        - sleep
+        - 1d
+        image: curlimages/curl
+        name: curl
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      nodeSelector:
+        deploymentGroup: deploymentGroup1
+      containers:
+      - name: nginx
+        image: nginx
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: default.conf
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+data:
+  default.conf: |
+    server {
+        listen 80;
+        location / {
+            return 200 "Pod IP: $hostname\n";
+            add_header Content-Type text/plain;
+        }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  selector:
+    app: nginx
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP
+  # type: LoadBalancer

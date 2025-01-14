@@ -171,15 +171,30 @@ if ! eksctl create nodegroup \
   --cluster $CLUSTER_NAME \
   --name $NODE_GROUP_NAME \
   --node-type $NODE_INSTANCE_TYPE \
-  --nodes 2 \
+  --nodes 1 \
   --nodes-min 1 \
-  --nodes-max 3 \
+  --nodes-max 2 \
   --ssh-access \
   --managed=false \
   --ssh-public-key $KEY_PAIR_NAME \
-  --subnet-ids ${SUBNETS[3]},${SUBNETS[4]},${SUBNETS[5]}; then
+  --subnet-ids ${SUBNETS[0]},${SUBNETS[1]},${SUBNETS[2]}; then
     echo "Error: Failed to create nodegroup. Please check the cluster connectivity and try again."
     exit 1
 fi
 
 echo "Nodegroup creation completed successfully!"
+
+#   # --node-private-networking \
+# eksctl create nodegroup \
+#   --cluster $CLUSTER_NAME \
+#   --name $NODE_GROUP_NAME \
+#   --node-type $NODE_INSTANCE_TYPE \
+#   --nodes 2 \
+#   --nodes-min 2 \
+#   --nodes-max 2 \
+#   --managed \
+#   --taint "node.cilium.io/agent-not-ready=true:NoExecute" \
+#   --ssh-access \
+#   --ssh-public-key $KEY_PAIR_NAME \
+#   --max-pods-per-node 110 \
+#   --subnet-ids subnet-02e9782a32d96b9eb,subnet-0e864ce562d8d7c81,subnet-0dae34501f8b92150
