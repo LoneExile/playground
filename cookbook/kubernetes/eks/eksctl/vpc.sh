@@ -165,19 +165,76 @@ if [ "$IS_CREATE_KEY_PAIR" = true ]; then
         --output text >"$KEY_PAIR_NAME".pem
 fi
 
+PUBLIC_SUBNETS=($(aws ec2 describe-subnets --filters "Name=map-public-ip-on-launch,Values=true" --query 'Subnets[*].SubnetId' --output text))
+PRIVATE_SUBNETS=($(aws ec2 describe-subnets --filters "Name=map-public-ip-on-launch,Values=false" --query 'Subnets[*].SubnetId' --output text))
+
+SUBNETS=()
+
+for i in 1 2 3; do
+    echo "Public Subnet $i: ${PUBLIC_SUBNETS[i]}"
+    SUBNETS+=(${PUBLIC_SUBNETS[i]})
+done
+for i in 1 2 3; do
+    echo "Private Subnet $i: ${PRIVATE_SUBNETS[i]}"
+    SUBNETS+=(${PRIVATE_SUBNETS[i]})
+done
+
+for i in 1 2 3 4 5 6; do
+    echo "Subnet $i: ${SUBNETS[i]}"
+done
+
+cat <<EOF >eksctl-config.yaml
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: ${CLUSTER_NAME}
+  region: ${REGION}
+
+vpc:
+  subnets:
+    public:
+      public-subnet-1:
+        id: ${SUBNETS[1]}
+      public-subnet-2:
+        id: ${SUBNETS[2]}
+      public-subnet-3:
+        id: ${SUBNETS[3]}
+    private:
+      private-subnet-1:
+        id: ${SUBNETS[4]}
+      private-subnet-2:
+        id: ${SUBNETS[5]}
+      private-subnet-3:
+        id: ${SUBNETS[6]}
+
+managedNodeGroups: []
+nodeGroups:
+  - name: ${NODE_GROUP_NAME}
+    instanceType: ${NODE_INSTANCE_TYPE}
+    desiredCapacity: 1
+    minSize: 1
+    maxSize: 2
+    privateNetworking: false
+    ssh:
+      allow: true
+      publicKeyName: ${KEY_PAIR_NAME}
+    ami: ${AMI_ID}
+    amiFamily: Bottlerocket
+    subnets: [${SUBNETS[1]}, ${SUBNETS[2]}, ${SUBNETS[3]}]
+    bottlerocket:
+      settings:
+        kubernetes:
+          system-reserved:
+            cpu: "10m"
+            memory: "100Mi"
+            ephemeral-storage: "1Gi"
+EOF
+
+
 # Create nodegroup with error handling
 echo "Creating nodegroup..."
 if ! eksctl create nodegroup \
-  --cluster $CLUSTER_NAME \
-  --name $NODE_GROUP_NAME \
-  --node-type $NODE_INSTANCE_TYPE \
-  --nodes 1 \
-  --nodes-min 1 \
-  --nodes-max 2 \
-  --ssh-access \
-  --managed=false \
-  --ssh-public-key $KEY_PAIR_NAME \
-  --subnet-ids ${SUBNETS[0]},${SUBNETS[1]},${SUBNETS[2]}; then
+  --config-file eksctl-config.yaml; then
     echo "Error: Failed to create nodegroup. Please check the cluster connectivity and try again."
     exit 1
 fi
