@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: s3-test-pod
+  namespace: default
+spec:
+  serviceAccountName: s3-access-sa
+  containers:
+  - name: app
+    image: amazon/aws-cli:latest
+    command: ["/bin/sh", "-c", "while true; do aws s3 ls s3://$(terraform output -raw s3_bucket_name); sleep 30; done"]
