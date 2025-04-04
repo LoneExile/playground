@@ -1,0 +1,69 @@
+replicaCount: 6
+
+image:
+  repository: harbor.voidbox.io/loneexile/app
+  pullPolicy: IfNotPresent
+  tag: "v2"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+rollout:
+  revisionHistoryLimit: 3
+  strategy:
+    blueGreen:
+      # activeService is the service that points to the active ReplicaSet
+      activeService: active
+      # previewService is the service that points to the preview ReplicaSet
+      previewService: preview
+      # autoPromotionEnabled automatically promotes the new ReplicaSet to the active service
+      autoPromotionEnabled: false
+      # autoPromotionSeconds automatically promotes the new ReplicaSet to the active service after specified time
+      autoPromotionSeconds: 10
+      # scaleDownDelaySeconds is the time to wait before scaling down the previous ReplicaSet
+      scaleDownDelaySeconds: 10
+      # previewReplicaCount is the number of replicas to deploy for the preview stack
+      previewReplicaCount: 1
+      # postPromotionAnalysis runs analysis after promotion
+      postPromotionAnalysis: true
+
+  # Analysis configuration for health checks and rollback
+  analysis:
+    # Number of consecutive successful analysis runs required for success
+    successfulRunCount: 1
+    # Maximum number of failed analyses before triggering a rollback
+    failureLimit: 1
+    # Interval between analysis runs in seconds
+    interval: 10
+    # Analysis timeout in seconds
+    timeout: 20
+    # Add metrics to check
+    metrics:
+      - name: success-rate
+        interval: 10s
+        # successCondition: result >= 0.95
+        # failureCondition: result < 0.95
+        successCondition: result == "success"
+        failureCondition: result != "success"
+        failureLimit: 1
+        # Number of times to run this metric (required to prevent indefinite runs)
+        count: 3
+        provider:
+          web:
+            # This URL will be used to check the health of the service
+            # url: https://blue-green.voidbox.io/status
+            url: http://blue-green-echo-api-blue-green.default:80/status
+            jsonPath: "{$.status}"
+            insecure: true
+            timeoutSeconds: 5

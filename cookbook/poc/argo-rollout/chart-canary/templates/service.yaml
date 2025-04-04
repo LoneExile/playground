@@ -1,0 +1,35 @@
+# Stable Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "my-app.fullname" . }}-stable
+  labels:
+    {{- include "my-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: stable
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "my-app.selectorLabels" . | nindent 4 }}
+---
+# Canary Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "my-app.fullname" . }}-canary
+  labels:
+    {{- include "my-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: canary
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "my-app.selectorLabels" . | nindent 4 }}

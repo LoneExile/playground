@@ -1,0 +1,6 @@
+apiVersion: v2
+name: echo-api-blue-green
+description: A Helm chart for Echo API with Argo Rollouts
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

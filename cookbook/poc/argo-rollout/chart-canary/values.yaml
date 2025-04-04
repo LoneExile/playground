@@ -1,0 +1,53 @@
+image:
+  repository: harbor.voidbox.io/loneexile/app
+  tag: "v2"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+rollout:
+  replicas: 5
+  revisionHistoryLimit: 3
+  strategy:
+    canary:
+      maxSurge: "25%"
+      maxUnavailable: 0
+      steps:
+        - setWeight: 20
+        - pause: {duration: 3s}
+        - analysis:
+            templates:
+            - templateName: web-check
+        - setWeight: 40
+        - pause: {duration: 3s}
+        - setWeight: 60
+        - pause: {duration: 3s}
+        - setWeight: 80
+
+analysis:
+  enabled: true
+  templates:
+    successRate:
+      metricInterval: 10s
+      count: 3
+      successCondition: result== "2.0.0"
+      failureCondition: result != "2.0.0"
+      failureLimit: 0
+      webCheck:
+          web:
+            # url: "https://canary.voidbox.io/status"
+            url: "http://canary-my-app-canary.default:80/status"
+            jsonPath: "{$.version}"
+            insecure: true
+            timeoutSeconds: 5
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi

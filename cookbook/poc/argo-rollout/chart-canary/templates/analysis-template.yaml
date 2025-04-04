@@ -1,0 +1,14 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: web-check
+spec:
+  metrics:
+    - name: webcheck
+      interval: {{ .Values.analysis.templates.successRate.metricInterval }}
+      count: {{ .Values.analysis.templates.successRate.count }}
+      successCondition: {{ .Values.analysis.templates.successRate.successCondition }}
+      failureCondition: {{ .Values.analysis.templates.successRate.failureCondition }}
+      failureLimit: {{ .Values.analysis.templates.successRate.failureLimit }}
+      provider:
+        {{- toYaml .Values.analysis.templates.successRate.webCheck | nindent 8 }}
