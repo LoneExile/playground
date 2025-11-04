@@ -1,0 +1,48 @@
+# Environment files with sensitive credentials
+.env
+*.env
+
+# Terraform files
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+
+# Terragrunt cache
+.terragrunt-cache/
+**/.terragrunt-cache/
+
+# Override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Sensitive variable files
+*.tfvars
+!example.tfvars
+terraform.tfvars
+terraform.tfvars.json
+
+# Generated files by Terragrunt
+backend.tf
+providers.tf
+common_variables.tf
+
+# CLI configuration files
+.terraformrc
+terraform.rc
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
