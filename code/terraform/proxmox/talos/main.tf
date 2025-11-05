@@ -339,6 +339,7 @@ resource "talos_machine_configuration_apply" "controlplane" {
   config_patches = [
     yamlencode({
       cluster = {
+        allowSchedulingOnControlPlanes = true
         controlPlane = {
           endpoint = "https://${local.talos_vip_ip}:6443"
         }
@@ -353,6 +354,22 @@ resource "talos_machine_configuration_apply" "controlplane" {
               vip = {
                 ip = local.talos_vip_ip
               }
+            }
+          ]
+        }
+        kernel = {
+          modules = [
+            {
+              name = "drbd"
+              parameters = [
+                "usermode_helper=disabled"
+              ]
+            },
+            {
+              name = "drbd_transport_tcp"
+            },
+            {
+              name = "dm-thin-pool"
             }
           ]
         }
