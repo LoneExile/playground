@@ -35,11 +35,18 @@ secrets.yaml
 # .env
 # .env.*
 
-# SSH keys
+# SSH keys and certificates
 *.pem
 *.key
+*.crt
+*.csr
+*.p12
+*.pfx
 id_rsa*
 id_ed25519*
+
+# Allow documentation certificate examples
+!docs/talos-ca.crt
 
 # macOS
 .DS_Store

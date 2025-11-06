@@ -357,6 +357,11 @@ resource "talos_machine_configuration_apply" "controlplane" {
             }
           ]
         }
+        sysctls = {
+          "net.ipv4.neigh.default.gc_thresh1" = "4096"
+          "net.ipv4.neigh.default.gc_thresh2" = "8192"
+          "net.ipv4.neigh.default.gc_thresh3" = "16384"
+        }
         kernel = {
           modules = [
             {

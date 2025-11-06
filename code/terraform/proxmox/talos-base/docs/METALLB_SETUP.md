@@ -1,12 +1,12 @@
 # Complete Guide: MetalLB on Talos Kubernetes
 
-This guide walks you through setting up MetalLB in L2 mode on a Talos Kubernetes cluster, enabling LoadBalancer services with bare-metal load balancing.
+This guide walks you through setting up MetalLB in L2 mode on a Talos Kubernetes cluster using Helm, enabling LoadBalancer services with bare-metal load balancing.
 
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)
 2. [Architecture Overview](#architecture-overview)
-3. [Step 1: Install MetalLB](#step-1-install-metallb)
+3. [Step 1: Install MetalLB with Helm](#step-1-install-metallb-with-helm)
 4. [Step 2: Configure IPAddressPool](#step-2-configure-ipaddresspool)
 5. [Step 3: Configure L2Advertisement](#step-3-configure-l2advertisement)
 6. [Step 4: Test LoadBalancer Service](#step-4-test-loadbalancer-service)
@@ -17,8 +17,10 @@ This guide walks you through setting up MetalLB in L2 mode on a Talos Kubernetes
 
 - **Talos Kubernetes cluster** running and accessible
 - **kubectl** configured with cluster access
+- **Helm 3.x** installed on your local machine
 - **IP address range** available on your network that doesn't overlap with DHCP or existing assignments
 - **Network connectivity** - Nodes must be on the same L2 network segment for L2 mode
+- **Proxmox** (if applicable) - Promiscuous mode must be enabled on the network bridge
 
 ### Network Requirements
 
@@ -26,6 +28,20 @@ This guide walks you through setting up MetalLB in L2 mode on a Talos Kubernetes
 - **Network**: Must be routable from clients
 - **L2 Adjacency**: All nodes must be on the same broadcast domain
 - **No IP conflicts**: Ensure this range isn't used by DHCP or other services
+
+### Talos Configuration Requirements
+
+For MetalLB to work properly on Talos, you need the following sysctls configured:
+
+```yaml
+machine:
+  sysctls:
+    net.ipv4.neigh.default.gc_thresh1: "4096"
+    net.ipv4.neigh.default.gc_thresh2: "8192"
+    net.ipv4.neigh.default.gc_thresh3: "16384"
+```
+
+These settings increase the ARP neighbor table limits, which is essential for MetalLB L2 mode to function correctly.
 
 ## Architecture Overview
 
@@ -40,29 +56,60 @@ In **L2 mode**:
 - Node forwards traffic to appropriate pods
 - Failover happens automatically if the leader node fails
 
-## Step 1: Install MetalLB
+## Step 1: Install MetalLB with Helm
 
-MetalLB can be installed via manifest or Helm. We'll use the official manifest method.
-
-### 1.1: Apply MetalLB Manifest
+### 1.1: Add MetalLB Helm Repository
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.15.2/config/manifests/metallb-native.yaml
+helm repo add metallb https://metallb.github.io/metallb
+helm repo update
 ```
 
-**Note**: Check [MetalLB releases](https://github.com/metallb/metallb/releases) for the latest version.
+### 1.2: Install MetalLB
 
-### 1.2: Wait for MetalLB Pods to be Ready
+```bash
+helm install my-metallb metallb/metallb \
+  --version 0.15.2 \
+  --namespace metallb-system \
+  --create-namespace \
+  --set speaker.ignoreExcludeLB=true
+```
+
+**Configuration details:**
+- `speaker.ignoreExcludeLB=true`: Tells MetalLB to ignore the `node.kubernetes.io/exclude-from-external-load-balancers` label that TalosOS applies by default. This is crucial for TalosOS compatibility.
+
+**Note**: Check [MetalLB Helm chart releases](https://github.com/metallb/metallb/releases) for the latest version.
+
+### 1.3: Configure Namespace PodSecurity
+
+MetalLB speakers require privileged capabilities. Set the namespace PodSecurity policy:
+
+```bash
+kubectl label namespace metallb-system \
+  pod-security.kubernetes.io/enforce=privileged \
+  pod-security.kubernetes.io/audit=privileged \
+  pod-security.kubernetes.io/warn=privileged
+```
+
+### 1.4: Remove Node Exclusion Labels
+
+If your control plane nodes have the `exclude-from-external-load-balancers` label, remove it:
+
+```bash
+kubectl label nodes --all node.kubernetes.io/exclude-from-external-load-balancers-
+```
+
+### 1.5: Wait for MetalLB Pods to be Ready
 
 ```bash
 kubectl wait pod --for=condition=Ready -n metallb-system \
-  -l app=metallb \
+  -l app.kubernetes.io/name=metallb \
   --timeout=120s
 ```
 
 This may take 1-2 minutes as images are pulled.
 
-### 1.3: Verify MetalLB Installation
+### 1.6: Verify MetalLB Installation
 
 ```bash
 kubectl get pods -n metallb-system
@@ -70,27 +117,28 @@ kubectl get pods -n metallb-system
 
 Expected output:
 ```
-NAME                          READY   STATUS    RESTARTS   AGE
-controller-xxxxxxxxxx-xxxxx   1/1     Running   0          2m
-speaker-xxxxx                 1/1     Running   0          2m
-speaker-xxxxx                 1/1     Running   0          2m
-speaker-xxxxx                 1/1     Running   0          2m
+NAME                                     READY   STATUS    RESTARTS   AGE
+my-metallb-controller-xxxxxxxxxx-xxxxx   1/1     Running   0          2m
+my-metallb-speaker-xxxxx                 4/4     Running   0          2m
+my-metallb-speaker-xxxxx                 4/4     Running   0          2m
+my-metallb-speaker-xxxxx                 4/4     Running   0          2m
 ```
 
 You should see:
-- **1 controller** pod
+- **1 controller** pod (Deployment)
 - **1 speaker** pod per node (DaemonSet)
+- Each speaker pod has 4 containers (cp-frr-files, cp-reloader, cp-metrics, speaker, frr, reloader, frr-metrics)
 
-### 1.4: Verify Components
+### 1.7: Verify Components
 
 Check the controller:
 ```bash
-kubectl get deployment -n metallb-system controller
+kubectl get deployment -n metallb-system my-metallb-controller
 ```
 
 Check the speaker DaemonSet:
 ```bash
-kubectl get daemonset -n metallb-system speaker
+kubectl get daemonset -n metallb-system my-metallb-speaker
 ```
 
 All pods should be **Running** and **Ready**.
@@ -111,13 +159,12 @@ metadata:
 spec:
   addresses:
   - 192.168.50.50-192.168.50.250
-  autoAssign: true
 EOF
 ```
 
 **Configuration details:**
 - `addresses`: IP range to allocate (192.168.50.50-192.168.50.250 = 201 IPs)
-- `autoAssign: true`: Automatically assign IPs to LoadBalancer services
+- `autoAssign: true` is the default - automatically assigns IPs to LoadBalancer services
 - `name: default-pool`: You can create multiple pools for different purposes
 
 ### 2.2: Verify IPAddressPool
@@ -156,13 +203,21 @@ metadata:
 spec:
   ipAddressPools:
   - default-pool
+  interfaces:
+  - eth0
 EOF
 ```
 
 **Configuration details:**
 - `ipAddressPools`: References the IPAddressPool(s) to advertise
-- No `interfaces` specified: Advertise on all network interfaces
+- `interfaces: [eth0]`: Explicitly specify the network interface for Talos
 - No `nodeSelectors`: All nodes can become speakers
+
+**Important**: The `interfaces` field is crucial for Talos Linux. On TalosOS, MetalLB speaker pods (which run with `hostNetwork: true`) see the interface as `eth0`, not `ens18`. To verify the correct interface name, check the speaker logs:
+
+```bash
+kubectl logs -n metallb-system -l app.kubernetes.io/component=speaker | grep localIfs
+```
 
 ### 3.2: Verify L2Advertisement
 
@@ -172,8 +227,8 @@ kubectl get l2advertisement -n metallb-system
 
 Expected output:
 ```
-NAME         IPADDRESSPOOLS   IPADDRESSPOOL SELECTORS   INTERFACES
-default-l2   ["default-pool"]
+NAME         IPADDRESSPOOLS     IPADDRESSPOOL SELECTORS   INTERFACES
+default-l2   ["default-pool"]                             ["eth0"]
 ```
 
 ### 3.3: Check L2Advertisement Details
@@ -182,13 +237,44 @@ default-l2   ["default-pool"]
 kubectl describe l2advertisement default-l2 -n metallb-system
 ```
 
-You should see it references `default-pool`.
+You should see it references `default-pool` and the `eth0` interface.
 
 ## Step 4: Test LoadBalancer Service
 
-Now let's verify MetalLB is working by creating a test LoadBalancer service.
+Now let's verify MetalLB is working by testing an existing LoadBalancer service.
 
-### 4.1: Deploy Test Application
+### 4.1: Check Existing Services
+
+```bash
+kubectl get svc --all-namespaces -o wide | grep LoadBalancer
+```
+
+You should see services with EXTERNAL-IP assigned from your pool (e.g., 192.168.50.80 for ingress-nginx).
+
+### 4.2: Test from Within Cluster
+
+```bash
+kubectl run test-curl --image=curlimages/curl:latest --rm -it --restart=Never -- \
+  curl --max-time 5 http://192.168.50.80
+```
+
+You should receive a response (404 or similar from nginx is expected without Host header).
+
+### 4.3: Test from External Network
+
+From your local machine or another host on the network:
+
+```bash
+curl http://192.168.50.80
+```
+
+**Expected Result**: You should receive a response from the ingress controller.
+
+**If this times out**, see the Proxmox configuration in the Troubleshooting section below.
+
+### 4.4: Create a Test LoadBalancer Service
+
+If you want to create a dedicated test service:
 
 ```bash
 kubectl apply -f - <<'EOF'
@@ -214,456 +300,265 @@ spec:
         ports:
         - containerPort: 80
           name: http
-        command: ["/bin/sh", "-c"]
-        args:
-        - |
-          echo "<h1>MetalLB Test</h1><p>Hostname: $(hostname)</p><p>Pod IP: $(hostname -i)</p>" > /usr/share/nginx/html/index.html
-          nginx -g 'daemon off;'
-EOF
-```
-
-### 4.2: Create LoadBalancer Service
-
-```bash
-kubectl apply -f - <<'EOF'
+---
 apiVersion: v1
 kind: Service
 metadata:
-  name: nginx-test-lb
+  name: nginx-test
+  labels:
+    app: nginx-test
 spec:
   type: LoadBalancer
   selector:
     app: nginx-test
   ports:
-  - protocol: TCP
+  - name: http
+    protocol: TCP
     port: 80
     targetPort: 80
-    name: http
 EOF
 ```
 
-### 4.3: Check Service Status
+Check the assigned IP:
+```bash
+kubectl get svc nginx-test
+```
+
+You should see an EXTERNAL-IP from your pool range.
+
+### 4.5: Clean Up Test Resources
 
 ```bash
-kubectl get service nginx-test-lb
-```
-
-Expected output:
-```
-NAME            TYPE           CLUSTER-IP      EXTERNAL-IP      PORT(S)        AGE
-nginx-test-lb   LoadBalancer   10.96.123.45    192.168.50.50    80:32100/TCP   30s
-```
-
-**Important**: The `EXTERNAL-IP` should be assigned from your pool (192.168.50.50-192.168.50.250). If it shows `<pending>`, see [Troubleshooting](#troubleshooting).
-
-### 4.4: Verify IP Assignment
-
-```bash
-kubectl describe service nginx-test-lb | grep "LoadBalancer Ingress"
-```
-
-You should see an IP from your configured range.
-
-### 4.5: Check Which Node Owns the IP
-
-```bash
-kubectl get pods -n metallb-system -l component=speaker -o wide
-```
-
-Check the speaker logs to see which node is announcing the IP:
-```bash
-# Replace with one of your speaker pod names
-kubectl logs -n metallb-system speaker-xxxxx | grep nginx-test-lb
-```
-
-You should see logs indicating the IP is being announced.
-
-### 4.6: Test Connectivity
-
-From a machine on the same network (not inside the cluster):
-
-```bash
-# Replace with your assigned IP
-curl http://192.168.50.50
-```
-
-Expected output:
-```html
-<h1>MetalLB Test</h1>
-<p>Hostname: nginx-test-xxxxxxxxx-xxxxx</p>
-<p>Pod IP: 10.244.x.x</p>
-```
-
-You can also test from your browser by visiting `http://192.168.50.50`.
-
-### 4.7: Test Load Balancing
-
-Make multiple requests to see different pod hostnames:
-
-```bash
-for i in {1..10}; do
-  curl -s http://192.168.50.50 | grep Hostname
-done
-```
-
-You should see requests distributed between the 2 nginx pods.
-
-### 4.8: Test Failover (Optional)
-
-To test failover, find which node is currently announcing the IP and cordon it:
-
-```bash
-# Find the node running the speaker that owns the IP
-kubectl get pods -n metallb-system -l component=speaker -o wide
-
-# Cordon the node (replace with actual node name)
-kubectl cordon talos-control-01
-
-# Delete the speaker pod on that node to force failover
-kubectl delete pod -n metallb-system speaker-xxxxx
-
-# Wait a moment, then check if the service is still accessible
-curl http://192.168.50.50
-```
-
-The service should remain accessible as another speaker takes over. Uncordon the node when done:
-
-```bash
-kubectl uncordon talos-control-01
-```
-
-### 4.9: Cleanup Test Resources
-
-If you want to remove the test deployment:
-
-```bash
-kubectl delete service nginx-test-lb
 kubectl delete deployment nginx-test
+kubectl delete service nginx-test
 ```
 
 ## Troubleshooting
 
-### LoadBalancer Service Stuck in Pending
+### Issue: Speaker Pods Not Starting
 
-**Symptom:**
+**Error**: `violates PodSecurity "baseline:latest"`
+
+**Solution**: Label the namespace with privileged PodSecurity policy:
+
 ```bash
-kubectl get service nginx-test-lb
-# EXTERNAL-IP shows <pending>
+kubectl label namespace metallb-system \
+  pod-security.kubernetes.io/enforce=privileged \
+  pod-security.kubernetes.io/audit=privileged \
+  pod-security.kubernetes.io/warn=privileged
 ```
 
-**Diagnosis:**
+### Issue: No IP Assigned to Service
 
-1. Check MetalLB controller logs:
+**Check**:
+1. Verify IPAddressPool exists and has available IPs
+2. Check MetalLB controller logs
+
 ```bash
-kubectl logs -n metallb-system deployment/controller
+kubectl logs -n metallb-system -l app.kubernetes.io/component=controller
 ```
 
-2. Check speaker logs:
+**Common causes**:
+- IP pool exhausted
+- Service doesn't match pool selectors
+- Controller not running
+
+### Issue: Cannot Reach LoadBalancer IP from External Network
+
+**Symptoms**: LoadBalancer IP works from within cluster but times out from external machines.
+
+**Diagnosis**:
+
+1. **Test from within cluster** (should work):
+   ```bash
+   kubectl run test-curl --image=curlimages/curl:latest --rm -it --restart=Never -- \
+     curl --max-time 5 http://LOADBALANCER_IP
+   ```
+
+2. **Check MetalLB speaker logs** for announcement activity:
+   ```bash
+   kubectl logs -n metallb-system -l app.kubernetes.io/component=speaker
+   ```
+
+3. **Verify L2Advertisement configuration**:
+   ```bash
+   kubectl get l2advertisement -n metallb-system -o yaml
+   ```
+
+**Solution for Proxmox Users**:
+
+If you're running on Proxmox, the network bridge (`vmbr0`) blocks ARP announcements by default. You must enable **promiscuous mode**:
+
+**Temporary (until reboot)**:
 ```bash
-kubectl logs -n metallb-system daemonset/speaker
+# SSH to Proxmox host
+ip link set vmbr0 promisc on
+
+# Verify
+ip link show vmbr0 | grep PROMISC
 ```
 
-**Common Causes:**
+**Permanent**:
 
-#### Issue 1: No IPAddressPool configured
-
-**Solution**: Ensure you created the IPAddressPool (Step 2).
+Edit `/etc/network/interfaces` on your Proxmox host:
 
 ```bash
-kubectl get ipaddresspool -n metallb-system
+auto vmbr0
+iface vmbr0 inet static
+    address YOUR_PROXMOX_IP/24
+    gateway YOUR_GATEWAY
+    bridge-ports YOUR_PHYSICAL_INTERFACE
+    bridge-stp off
+    bridge-fd 0
+    post-up ip link set vmbr0 promisc on
 ```
 
-#### Issue 2: No L2Advertisement configured
-
-**Solution**: Ensure you created the L2Advertisement (Step 3).
-
+Then restart networking:
 ```bash
-kubectl get l2advertisement -n metallb-system
+systemctl restart networking
 ```
 
-#### Issue 3: IPAddressPool not referenced in L2Advertisement
+### Issue: ARP Neighbor Table Full
 
-**Solution**: Check that L2Advertisement references the correct pool:
+**Symptoms**: MetalLB stops announcing IPs after some time.
 
-```bash
-kubectl get l2advertisement default-l2 -n metallb-system -o yaml | grep -A5 ipAddressPools
+**Solution**: Ensure Talos sysctls are configured (see Prerequisites section above). These should be set in your Talos machine configuration:
+
+```yaml
+machine:
+  sysctls:
+    net.ipv4.neigh.default.gc_thresh1: "4096"
+    net.ipv4.neigh.default.gc_thresh2: "8192"
+    net.ipv4.neigh.default.gc_thresh3: "16384"
 ```
 
-#### Issue 4: All IPs in pool exhausted
+### Issue: Node Label Prevents MetalLB
 
-**Solution**: Check if all IPs are already assigned:
+**Symptoms**: Speaker pods don't schedule or LoadBalancer IPs not announced.
 
+**Check**:
 ```bash
-kubectl get services --all-namespaces -o wide | grep LoadBalancer
+kubectl get nodes --show-labels | grep exclude
 ```
 
-If all 201 IPs are used, expand your pool or delete unused services.
-
-### Service Unreachable from Outside
-
-**Symptom**: Service gets an EXTERNAL-IP but is unreachable from outside the cluster.
-
-**Diagnosis:**
-
-1. Check if you can reach it from a cluster node:
+**Solution**: Remove the exclusion label:
 ```bash
-# SSH to a node or use kubectl exec
-curl http://192.168.50.50
+kubectl label nodes --all node.kubernetes.io/exclude-from-external-load-balancers-
 ```
 
-2. Check ARP table on your client machine:
-```bash
-# Linux/Mac
-arp -a | grep 192.168.50.50
+### Viewing MetalLB Logs
 
-# Windows
-arp -a | findstr 192.168.50.50
+**Controller logs**:
+```bash
+kubectl logs -n metallb-system -l app.kubernetes.io/component=controller --tail=100
 ```
 
-**Common Causes:**
-
-#### Issue 1: Network not on same L2 segment
-
-**Solution**: L2 mode requires nodes and clients to be on the same broadcast domain. If you're on a different subnet, you need:
-- A router that forwards ARP/routes the subnet
-- Or use BGP mode instead of L2 mode
-
-#### Issue 2: Firewall blocking traffic
-
-**Solution**: Check if a firewall on the Talos nodes is blocking traffic:
-
+**Speaker logs** (from all speakers):
 ```bash
-# Talos doesn't use iptables, but check if kube-proxy rules are correct
-kubectl get endpoints nginx-test-lb
+kubectl logs -n metallb-system -l app.kubernetes.io/component=speaker --tail=50 --prefix=true
 ```
 
-#### Issue 3: Speaker not running on any node
-
-**Solution**: Verify speaker DaemonSet is running:
-
+**Speaker logs** (from specific node):
 ```bash
-kubectl get pods -n metallb-system -l component=speaker
+kubectl logs -n metallb-system -l app.kubernetes.io/component=speaker --field-selector spec.nodeName=NODE_NAME
 ```
 
-All nodes should have a speaker pod in **Running** state.
+### Check MetalLB Configuration
 
-### Speaker Pods CrashLoopBackOff
-
-**Symptom:**
+View all MetalLB CRDs:
 ```bash
-kubectl get pods -n metallb-system
-# speaker-xxx shows CrashLoopBackOff
+kubectl get ipaddresspool,l2advertisement -n metallb-system
 ```
 
-**Diagnosis:**
-
-Check speaker logs:
+Detailed view:
 ```bash
-kubectl logs -n metallb-system speaker-xxxxx
-```
-
-**Common Causes:**
-
-#### Issue 1: Permission issues
-
-MetalLB speaker requires certain capabilities. Check the DaemonSet security context:
-
-```bash
-kubectl get daemonset -n metallb-system speaker -o yaml | grep -A10 securityContext
-```
-
-**Solution**: Ensure speaker has `NET_RAW` capability (already configured in official manifest).
-
-#### Issue 2: Conflicting network plugin
-
-Some CNI plugins conflict with MetalLB's L2 mode.
-
-**Solution**: Verify your CNI (Talos uses default CNI). MetalLB should work with most CNIs, but check [MetalLB compatibility](https://metallb.universe.tf/installation/network-addons/).
-
-### Multiple Services Get Same IP
-
-**Symptom**: Two different services are assigned the same EXTERNAL-IP.
-
-**Diagnosis:**
-
-```bash
-kubectl get services --all-namespaces | grep LoadBalancer
-```
-
-**Solution**: This should not happen. MetalLB controller prevents duplicate assignments. If it occurs:
-
-1. Check controller logs:
-```bash
-kubectl logs -n metallb-system deployment/controller
-```
-
-2. Restart MetalLB controller:
-```bash
-kubectl rollout restart deployment -n metallb-system controller
+kubectl get ipaddresspool,l2advertisement -n metallb-system -o yaml
 ```
 
 ## Production Considerations
 
-### IP Address Pool Planning
-
-**Current configuration**: 192.168.50.50-192.168.50.250 (201 IPs)
-
-Consider:
-- **Service growth**: How many LoadBalancer services will you need?
-- **Reserved IPs**: Leave some IPs for future expansion or manual assignment
-- **Pool segmentation**: Create multiple pools for different purposes
-
-Example of multiple pools:
-
-```yaml
----
-apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
-metadata:
-  name: web-services
-  namespace: metallb-system
-spec:
-  addresses:
-  - 192.168.50.50-192.168.50.100
-  autoAssign: true
----
-apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
-metadata:
-  name: database-services
-  namespace: metallb-system
-spec:
-  addresses:
-  - 192.168.50.101-192.168.50.150
-  autoAssign: true
----
-apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
-metadata:
-  name: reserved-manual
-  namespace: metallb-system
-spec:
-  addresses:
-  - 192.168.50.151-192.168.50.250
-  autoAssign: false  # Manual assignment only
-```
-
-You can then specify which pool to use in a Service:
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: my-db-service
-  annotations:
-    metallb.universe.tf/address-pool: database-services
-spec:
-  type: LoadBalancer
-  # ...
-```
-
-### Requesting Specific IPs
-
-You can request a specific IP from the pool:
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: my-web-service
-spec:
-  type: LoadBalancer
-  loadBalancerIP: 192.168.50.100  # Request specific IP
-  # ...
-```
-
-**Note**: The IP must be within a configured IPAddressPool.
-
-### L2 Mode Limitations
-
-**Bandwidth bottleneck**:
-- In L2 mode, all traffic for a service goes through a single node
-- If you have high-traffic services, consider:
-  - Using multiple services (each gets its own IP and node)
-  - Switching to BGP mode for better load distribution
-  - Using Ingress controller with a single LoadBalancer
-
-**Failover time**:
-- When a node fails, it takes ~10 seconds for another node to take over
-- This is due to ARP cache expiration on client devices
-- For faster failover, consider BGP mode
-
-### L2 vs BGP Mode
-
-| Feature | L2 Mode | BGP Mode |
-|---------|---------|----------|
-| Setup complexity | Simple (what we did) | Complex (requires BGP router) |
-| Network requirements | Same L2 segment | Routable network |
-| Load distribution | Single node per service | Multiple nodes (ECMP) |
-| Failover time | ~10 seconds | ~1 second |
-| Bandwidth | Limited to 1 node | Distributed across nodes |
-| Best for | Small/medium clusters, simple networks | Large clusters, datacenter environments |
-
-For most home labs and small clusters, **L2 mode (what we configured) is perfect**.
-
 ### High Availability
 
-To ensure MetalLB availability:
+- **Speaker DaemonSet**: Runs on every node, providing redundancy
+- **Leader Election**: One speaker "owns" each LoadBalancer IP
+- **Automatic Failover**: If the leader node fails, another speaker takes over
+- **Graceful Migration**: When a speaker pod restarts, IPs are migrated gracefully
 
-1. **Multiple nodes**: MetalLB speaker DaemonSet runs on all nodes, providing automatic failover.
+### IP Pool Management
 
-2. **Controller replicas**: For production, consider running multiple controller replicas:
+**Multiple Pools**:
+```yaml
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: production-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 192.168.50.100-192.168.50.150
+  autoAssign: false  # Manual assignment only
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: development-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 192.168.50.200-192.168.50.250
+```
 
+**Service-specific IP assignment**:
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+  annotations:
+    metallb.universe.tf/address-pool: production-pool
+    metallb.universe.tf/loadBalancerIPs: 192.168.50.100
+spec:
+  type: LoadBalancer
+  # ...
+```
+
+### Resource Limits
+
+Add resource limits to the Helm values file for production:
+
+```yaml
+# values.yaml
+controller:
+  resources:
+    limits:
+      cpu: 100m
+      memory: 100Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+speaker:
+  resources:
+    limits:
+      cpu: 100m
+      memory: 100Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+```
+
+Install with values:
 ```bash
-kubectl scale deployment -n metallb-system controller --replicas=2
+helm install my-metallb metallb/metallb \
+  --version 0.15.2 \
+  --namespace metallb-system \
+  --create-namespace \
+  --values values.yaml
 ```
 
-3. **Pod disruption budgets**: Prevent all speakers from being evicted during maintenance:
+### Network Policies
 
-```yaml
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: metallb-speaker
-  namespace: metallb-system
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      component: speaker
-```
-
-### Monitoring
-
-MetalLB exposes Prometheus metrics. To monitor:
-
-1. **Controller metrics**: Available at port 7472
-2. **Speaker metrics**: Available at port 7472
-
-Example ServiceMonitor for Prometheus Operator:
-
-```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: metallb
-  namespace: metallb-system
-spec:
-  selector:
-    matchLabels:
-      app: metallb
-  endpoints:
-  - port: monitoring
-```
-
-Key metrics to watch:
-- `metallb_allocator_addresses_in_use_total`: IPs allocated
-- `metallb_speaker_announced`: Services being announced
-- `metallb_allocator_addresses_total`: Total IPs in pools
-
-### Security
-
-1. **Network policies**: Restrict access to MetalLB components:
+Restrict MetalLB traffic with NetworkPolicies if needed:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -674,202 +569,93 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app: metallb
-      component: controller
+      app.kubernetes.io/component: controller
   policyTypes:
   - Ingress
+  - Egress
   ingress:
   - from:
     - namespaceSelector: {}
     ports:
     - protocol: TCP
-      port: 7472  # Metrics only
+      port: 9443  # Webhook
+  egress:
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 6443  # Kubernetes API
 ```
 
-2. **RBAC**: The official manifest includes proper RBAC rules. Don't modify unless necessary.
+### Monitoring
 
-3. **Pod security**: Speakers need `NET_RAW` capability to send ARP packets. This is required and already configured.
+MetalLB exposes Prometheus metrics:
 
-### Upgrades
+**Controller metrics**: `http://controller-pod:7472/metrics`
+**Speaker metrics**: `http://speaker-pod:7472/metrics`
 
-To upgrade MetalLB:
+Key metrics to monitor:
+- `metallb_allocator_addresses_in_use_total`: Number of IPs allocated
+- `metallb_allocator_addresses_total`: Total IPs available
+- `metallb_speaker_announced`: Number of services announced
+- `metallb_k8s_client_update_errors_total`: API errors
+
+### Upgrading MetalLB
+
+To upgrade MetalLB to a newer version:
 
 ```bash
 # Check current version
-kubectl get pods -n metallb-system -o jsonpath='{.items[0].spec.containers[0].image}'
+helm list -n metallb-system
 
-# Apply new manifest (replace version)
-kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.15.2/config/manifests/metallb-native.yaml
+# Update Helm repo
+helm repo update
+
+# Search for available versions
+helm search repo metallb/metallb --versions
+
+# Upgrade
+helm upgrade my-metallb metallb/metallb \
+  --version NEW_VERSION \
+  --namespace metallb-system \
+  --reuse-values
 ```
 
-**Important**: Always check [MetalLB release notes](https://metallb.universe.tf/release-notes/) for breaking changes.
+### Uninstalling MetalLB
 
-### Integration with Ingress Controllers
+To completely remove MetalLB:
 
-A common pattern is to use MetalLB to expose an Ingress controller:
+```bash
+# Remove Helm release
+helm uninstall my-metallb -n metallb-system
 
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: ingress-nginx-controller
-  namespace: ingress-nginx
-spec:
-  type: LoadBalancer
-  loadBalancerIP: 192.168.50.80  # Reserve specific IP
-  ports:
-  - name: http
-    port: 80
-    targetPort: http
-  - name: https
-    port: 443
-    targetPort: https
-  selector:
-    app.kubernetes.io/name: ingress-nginx
+# Remove CRDs (if needed)
+kubectl delete crd \
+  addresspools.metallb.io \
+  bfdprofiles.metallb.io \
+  bgpadvertisements.metallb.io \
+  bgppeers.metallb.io \
+  communities.metallb.io \
+  ipaddresspools.metallb.io \
+  l2advertisements.metallb.io \
+  servicebgpstatuses.metallb.io \
+  servicel2statuses.metallb.io
+
+# Remove namespace
+kubectl delete namespace metallb-system
 ```
 
-Then all your web services use Ingress resources (sharing the single LoadBalancer IP) instead of individual LoadBalancer services.
-
-## Common Use Cases
-
-### 1. Exposing a Web Application
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: my-webapp
-spec:
-  type: LoadBalancer
-  selector:
-    app: webapp
-  ports:
-  - port: 80
-    targetPort: 8080
-```
-
-### 2. Exposing a Database (with specific IP)
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: postgres-external
-spec:
-  type: LoadBalancer
-  loadBalancerIP: 192.168.50.100
-  selector:
-    app: postgres
-  ports:
-  - port: 5432
-    targetPort: 5432
-```
-
-### 3. Exposing Multiple Ports
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: game-server
-spec:
-  type: LoadBalancer
-  selector:
-    app: game-server
-  ports:
-  - name: game-port
-    port: 7777
-    targetPort: 7777
-    protocol: UDP
-  - name: query-port
-    port: 27015
-    targetPort: 27015
-    protocol: UDP
-```
-
-### 4. Combining with ExternalDNS
-
-If you use ExternalDNS, you can automatically create DNS records:
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: my-service
-  annotations:
-    external-dns.alpha.kubernetes.io/hostname: myapp.example.com
-spec:
-  type: LoadBalancer
-  # ...
-```
-
-## References
+## Additional Resources
 
 - [MetalLB Official Documentation](https://metallb.universe.tf/)
 - [MetalLB GitHub Repository](https://github.com/metallb/metallb)
-- [MetalLB Configuration Reference](https://metallb.universe.tf/configuration/)
-- [MetalLB Concepts](https://metallb.universe.tf/concepts/)
-- [Talos Network Configuration](https://www.talos.dev/latest/talos-guides/network/)
-
-## Appendix: Complete Configuration
-
-Here's the complete MetalLB configuration for quick reference:
-
-```yaml
----
-# IPAddressPool: Defines available IP addresses
-apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
-metadata:
-  name: default-pool
-  namespace: metallb-system
-spec:
-  addresses:
-  - 192.168.50.50-192.168.50.250
-  autoAssign: true
-
----
-# L2Advertisement: Configures L2 mode announcement
-apiVersion: metallb.io/v1beta1
-kind: L2Advertisement
-metadata:
-  name: default-l2
-  namespace: metallb-system
-spec:
-  ipAddressPools:
-  - default-pool
-```
-
-## Appendix: Useful Commands
-
-```bash
-# Check MetalLB status
-kubectl get pods -n metallb-system
-kubectl get ipaddresspool -n metallb-system
-kubectl get l2advertisement -n metallb-system
-
-# List all LoadBalancer services
-kubectl get services --all-namespaces -o wide | grep LoadBalancer
-
-# Check which IPs are assigned
-kubectl get services --all-namespaces -o json | \
-  jq -r '.items[] | select(.spec.type=="LoadBalancer") | "\(.metadata.name)\t\(.status.loadBalancer.ingress[0].ip)"'
-
-# View MetalLB controller logs
-kubectl logs -n metallb-system deployment/controller -f
-
-# View speaker logs on all nodes
-kubectl logs -n metallb-system daemonset/speaker -f
-
-# Check speaker on specific node
-kubectl logs -n metallb-system speaker-xxxxx -f
-
-# Restart MetalLB components
-kubectl rollout restart deployment -n metallb-system controller
-kubectl rollout restart daemonset -n metallb-system speaker
-```
+- [MetalLB Helm Chart](https://github.com/metallb/metallb/tree/main/charts/metallb)
+- [Talos Linux Documentation](https://www.talos.dev/)
+- [Kubernetes Service LoadBalancer](https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer)
 
 ---
 
-**Last Updated:** 2025-11-06
-**Tested with:** Talos v1.11.1, Kubernetes v1.33.3, MetalLB v0.15.2
+**Last Updated**: 2025-11-06
+**MetalLB Version**: v0.15.2 (Helm chart)
+**Talos Version**: v1.11.1
+**Kubernetes Version**: v1.33.3
