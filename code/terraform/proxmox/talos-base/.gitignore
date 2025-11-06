@@ -32,8 +32,8 @@ secrets.yaml
 *.kubeconfig
 
 # Environment files
-.env
-.env.*
+# .env
+# .env.*
 
 # SSH keys
 *.pem
@@ -54,3 +54,8 @@ id_ed25519*
 # Backup files
 *.bak
 *.backup
+
+*.md
+
+!docs/*.md
+!README.md
