@@ -57,6 +57,11 @@ variable "CD_ROM" {
   type        = string
 }
 
+variable "CLUSTER_CIDR" {
+  description = "CIDR block for the cluster network"
+  type        = string
+}
+
 variable "KUBERNETES_VERSION" {
   description = "Version of Kubernetes to deploy"
   type        = string
@@ -330,32 +335,74 @@ module "wait_for_talos_api" {
 resource "talos_machine_configuration_apply" "controlplane" {
   for_each = local.talos_master_nodes
 
-  depends_on = [proxmox_vm_qemu.talos]
-
+  depends_on                  = [proxmox_vm_qemu.talos, module.wait_for_talos_api]
+  # client_configuration        = talos_machine_secrets.this.client_configuration
+  # client_configuration        = data.talos_client_configuration.this.client_configuration
   client_configuration        = talos_machine_secrets.this.client_configuration
   machine_configuration_input = data.talos_machine_configuration.controlplane.machine_configuration
-  node                       = proxmox_vm_qemu.talos[each.key].default_ipv4_address
-
+  node                        = proxmox_vm_qemu.talos[each.key].default_ipv4_address
   config_patches = [
     yamlencode({
-      cluster = {
-        allowSchedulingOnControlPlanes = true
-        controlPlane = {
-          endpoint = "https://${local.talos_vip_ip}:6443"
-        }
-      }
       machine = {
+        nodeLabels = {
+          "node.kubernetes.io/exclude-from-external-load-balancers" = {
+            "$patch" = "delete"
+          }
+        }
         network = {
-          hostname = each.key
           interfaces = [
             {
               interface = "ens18"
               dhcp      = true
               vip = {
-                ip = local.talos_vip_ip
+                ip = var.VIP_IP
               }
             }
           ]
+        }
+      }
+      cluster = {
+        allowSchedulingOnControlPlanes = true
+        controllerManager = {
+          extraArgs = {
+            bind-address = "0.0.0.0"
+          }
+        }
+        scheduler = {
+          extraArgs = {
+            bind-address = "0.0.0.0"
+          }
+        }
+        apiServer = {
+          certSANs = [
+            "127.0.0.1",
+            var.VIP_IP
+          ]
+        }
+        proxy = {
+          disabled = true
+        }
+        discovery = {
+          enabled = false
+        }
+        etcd = {
+          advertisedSubnets = [
+            "${var.VIP_IP}/24"
+          ]
+        }
+      }
+    }),
+    yamlencode({
+      machine = {
+        kubelet = {
+          nodeIP = {
+            validSubnets = [
+              var.CLUSTER_CIDR
+            ]
+          }
+          extraConfig = {
+            maxPods = 512
+          }
         }
         sysctls = {
           "net.ipv4.neigh.default.gc_thresh1" = "4096"
@@ -365,24 +412,78 @@ resource "talos_machine_configuration_apply" "controlplane" {
         kernel = {
           modules = [
             {
+              name = "openvswitch"
+            },
+            {
               name = "drbd"
               parameters = [
                 "usermode_helper=disabled"
               ]
             },
             {
-              name = "drbd_transport_tcp"
+              name = "zfs"
             },
             {
-              name = "dm-thin-pool"
+              name = "spl"
+            },
+            {
+              name = "vfio_pci"
+            },
+            {
+              name = "vfio_iommu_type1"
             }
           ]
+        }
+        install = {
+          image = var.TALOS_IMAGE_URL
+          disk  = "/dev/vda"
+        }
+        files = [
+          {
+            content = <<-EOT
+              [plugins]
+                [plugins."io.containerd.cri.v1.runtime"]
+                  device_ownership_from_security_context = true
+            EOT
+            path    = "/etc/cri/conf.d/20-customization.part"
+            op      = "create"
+          }
+        ]
+      }
+      cluster = {
+        network = {
+          cni = {
+            name = "none"
+          }
+          dnsDomain = "maxcloud.local"
+          podSubnets = [
+            "10.244.0.0/16"
+          ]
+          serviceSubnets = [
+            "10.96.0.0/16"
+          ]
+        }
+      }
+    }),
+    yamlencode({
+      cluster = {
+        controlPlane = {
+          endpoint = "https://${local.talos_vip_ip}:6443"
+        }
+      }
+      machine = {
+        network = {
+          hostname = each.key
         }
         features = {
           kubePrism = {
             enabled = true
             port    = 7445
           }
+        }
+        install = {
+          image = var.TALOS_IMAGE_URL
+          disk  = "/dev/vda"
         }
       }
     })
@@ -393,13 +494,89 @@ resource "talos_machine_configuration_apply" "controlplane" {
 resource "talos_machine_configuration_apply" "worker" {
   for_each = local.talos_worker_nodes
 
-  depends_on = [proxmox_vm_qemu.talos_workers]
+  depends_on = [
+    proxmox_vm_qemu.talos_workers,
+    talos_machine_configuration_apply.controlplane,
+    module.wait_for_talos_api
+  ]
 
   client_configuration        = talos_machine_secrets.this.client_configuration
   machine_configuration_input = data.talos_machine_configuration.worker.machine_configuration
-  node                       = proxmox_vm_qemu.talos_workers[each.key].default_ipv4_address
-
+  node                        = proxmox_vm_qemu.talos_workers[each.key].default_ipv4_address
   config_patches = [
+    yamlencode({
+      machine = {
+        kubelet = {
+          nodeIP = {
+            validSubnets = [
+              var.CLUSTER_CIDR
+            ]
+          }
+          extraConfig = {
+            maxPods = 512
+          }
+        }
+        sysctls = {
+          "net.ipv4.neigh.default.gc_thresh1" = "4096"
+          "net.ipv4.neigh.default.gc_thresh2" = "8192"
+          "net.ipv4.neigh.default.gc_thresh3" = "16384"
+        }
+        kernel = {
+          modules = [
+            {
+              name = "openvswitch"
+            },
+            {
+              name = "drbd"
+              parameters = [
+                "usermode_helper=disabled"
+              ]
+            },
+            {
+              name = "zfs"
+            },
+            {
+              name = "spl"
+            },
+            {
+              name = "vfio_pci"
+            },
+            {
+              name = "vfio_iommu_type1"
+            }
+          ]
+        }
+        install = {
+          image = var.TALOS_IMAGE_URL
+          disk  = "/dev/vda"
+        }
+        files = [
+          {
+            content = <<-EOT
+              [plugins]
+                [plugins."io.containerd.cri.v1.runtime"]
+                  device_ownership_from_security_context = true
+            EOT
+            path    = "/etc/cri/conf.d/20-customization.part"
+            op      = "create"
+          }
+        ]
+      }
+      cluster = {
+        network = {
+          cni = {
+            name = "none"
+          }
+          dnsDomain = "maxcloud.local"
+          podSubnets = [
+            "10.244.0.0/16"
+          ]
+          serviceSubnets = [
+            "10.96.0.0/16"
+          ]
+        }
+      }
+    }),
     yamlencode({
       cluster = {
         controlPlane = {
@@ -415,6 +592,10 @@ resource "talos_machine_configuration_apply" "worker" {
             enabled = true
             port    = 7445
           }
+        }
+        install = {
+          image = var.TALOS_IMAGE_URL
+          disk  = "/dev/vda"
         }
       }
     })

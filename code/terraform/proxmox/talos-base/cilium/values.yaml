@@ -1,0 +1,69 @@
+# Cilium Configuration for Talos OS
+# Optimized configuration with kube-proxy replacement and host firewall
+
+# Routing configuration
+routingMode: tunnel
+tunnelProtocol: vxlan
+tunnelPort: 8473
+
+# IPAM configuration
+ipam:
+  mode: "kubernetes"
+
+# Replace kube-proxy with Cilium's eBPF implementation
+kubeProxyReplacement: true
+
+# Enable host firewall for enhanced security
+hostFirewall:
+  enabled: true
+
+# Disable Hubble for reduced resource usage
+hubble:
+  enabled: false
+
+# Enable external IPs support
+externalIPs:
+  enabled: true
+
+# Enable NodePort services
+nodePort:
+  enabled: true
+
+# Load balancer configuration
+loadBalancer:
+  algorithm: maglev
+
+# Disable Envoy for lighter deployment (no L7 features)
+envoy:
+  enabled: false
+
+# Talos-specific configuration
+# Talos uses KubePrism which runs on localhost:7445
+k8sServiceHost: localhost
+k8sServicePort: 7445
+
+# Security context for Talos
+securityContext:
+  capabilities:
+    ciliumAgent:
+      - CHOWN
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - IPC_LOCK
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cleanCiliumState:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+
+# Cgroup configuration for Talos
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup
