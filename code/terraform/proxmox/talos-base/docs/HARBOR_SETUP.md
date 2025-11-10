@@ -2,6 +2,126 @@
 
 This guide walks you through deploying Harbor, an open-source container registry, on a Talos Kubernetes cluster using Helm with HTTPS and NGINX Ingress.
 
+---
+
+## Installation Status - Current Deployment
+
+**Installation Date**: 2025-11-10
+**Status**: ✅ OPERATIONAL
+**Version**: Latest (Helm chart harbor/harbor)
+**Cluster**: Talos v1.11.1, Kubernetes v1.33.3
+
+### Current Configuration
+
+**URL**: https://harbor.cloud.local
+**Ingress IP**: 192.168.50.80 (via MetalLB)
+**Admin Password**: Harbor12345
+**TLS**: Enabled (cert-manager with self-signed CA)
+
+### Components Running (7/7)
+
+```
+harbor-core:          1/1  (API & Web UI)
+harbor-portal:        1/1  (Frontend)
+harbor-registry:      2/2  (Docker Distribution)
+harbor-database:      1/1  (PostgreSQL)
+harbor-redis:         1/1  (Cache)
+harbor-jobservice:    1/1  (Background Jobs)
+harbor-trivy:         1/1  (Vulnerability Scanner)
+```
+
+### Persistent Storage (Piraeus ZFS+DRBD 2-way)
+
+```
+Registry:    20Gi (40Gi with replication)
+Database:     5Gi (10Gi with replication)
+Redis:        1Gi (2Gi with replication)
+Jobservice:   1Gi (2Gi with replication)
+Trivy:        5Gi (10Gi with replication)
+──────────────────────────────────────
+Total:       32Gi (~64Gi with replication)
+```
+
+### Actual Installation Commands Used
+
+```bash
+# Create Harbor certificate
+kubectl apply -f - <<'EOF'
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: harbor-cert
+  namespace: default
+spec:
+  secretName: harbor-tls-secret
+  issuerRef:
+    name: ca-issuer
+    kind: ClusterIssuer
+  dnsNames:
+    - harbor.cloud.local
+    - core.harbor.cloud.local
+    - notary.harbor.cloud.local
+  duration: 2160h
+  renewBefore: 360h
+EOF
+
+# Add Harbor Helm repository
+helm repo add harbor https://helm.goharbor.io
+helm repo update
+
+# Install Harbor
+helm install harbor harbor/harbor \
+  --namespace harbor \
+  --create-namespace \
+  --values harbor-values.yaml
+```
+
+**Values File**: `harbor-values.yaml` (see project root)
+
+### Verification Results
+
+```bash
+# Harbor pods running
+$ kubectl get pods -n harbor
+NAME                                    READY   STATUS    RESTARTS   AGE
+harbor-core-xxxxx                       1/1     Running   0          1h
+harbor-database-0                       1/1     Running   0          1h
+harbor-jobservice-xxxxx                 1/1     Running   0          1h
+harbor-portal-xxxxx                     1/1     Running   0          1h
+harbor-redis-0                          1/1     Running   0          1h
+harbor-registry-xxxxx                   2/2     Running   0          1h
+harbor-trivy-0                          1/1     Running   0          1h
+
+# Persistent volumes bound
+$ kubectl get pvc -n harbor
+NAME                              STATUS   VOLUME       CAPACITY   STORAGECLASS      AGE
+data-harbor-redis-0               Bound    pvc-xxxxx    1Gi        piraeus-storage   1h
+data-harbor-trivy-0               Bound    pvc-xxxxx    5Gi        piraeus-storage   1h
+database-data-harbor-database-0   Bound    pvc-xxxxx    5Gi        piraeus-storage   1h
+harbor-jobservice                 Bound    pvc-xxxxx    1Gi        piraeus-storage   1h
+harbor-registry                   Bound    pvc-xxxxx    20Gi       piraeus-storage   1h
+
+# Ingress configured
+$ kubectl get ingress -n harbor
+NAME                       CLASS   HOSTS                ADDRESS         PORTS     AGE
+harbor-ingress             nginx   harbor.cloud.local   192.168.50.80   80, 443   1h
+harbor-ingress-notary      nginx   notary.harbor...     192.168.50.80   80, 443   1h
+
+# Test web access
+$ curl -k https://harbor.cloud.local
+<html>...Harbor...</html>
+```
+
+### Access Information
+
+1. **Add to /etc/hosts**: `192.168.50.80 harbor.cloud.local`
+2. **Trust CA**: `sudo security add-trusted-cert -k /Library/Keychains/System.keychain docs/talos-ca.crt`
+3. **Web UI**: https://harbor.cloud.local
+4. **Login**: admin / Harbor12345
+5. **Docker login**: `docker login harbor.cloud.local`
+
+---
+
 ## Quick Installation Summary
 
 **Installed Version**: Harbor (Helm Chart: harbor/harbor)

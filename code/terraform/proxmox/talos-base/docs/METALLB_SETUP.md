@@ -2,6 +2,109 @@
 
 This guide walks you through setting up MetalLB in L2 mode on a Talos Kubernetes cluster using Helm, enabling LoadBalancer services with bare-metal load balancing.
 
+---
+
+## Installation Status - Current Deployment
+
+**Installation Date**: 2025-11-10
+**Status**: ✅ OPERATIONAL
+**Version**: v0.15.2 (Helm chart)
+**Cluster**: Talos v1.11.1, Kubernetes v1.33.3
+
+### Current Configuration
+
+**Mode**: L2 (Layer 2 / ARP-based)
+**IP Pool**: 192.168.50.50-192.168.50.250 (201 IPs)
+**Interface**: eth0
+**Talos Setting**: `speaker.ignoreExcludeLB=true`
+
+### Components Running
+
+```
+Controller: 1/1
+Speakers:   3/3 (one per node, 4 containers each)
+```
+
+### IP Assignments
+
+- `192.168.50.80` - NGINX Ingress Controller
+
+**Available IPs**: 200 (192.168.50.50-79, 81-250)
+
+### Actual Installation Commands Used
+
+```bash
+# Add Helm repository
+helm repo add metallb https://metallb.github.io/metallb
+helm repo update
+
+# Install MetalLB
+helm install my-metallb metallb/metallb \
+  --version 0.15.2 \
+  --namespace metallb-system \
+  --create-namespace \
+  --set speaker.ignoreExcludeLB=true
+
+# Configure namespace PodSecurity
+kubectl label namespace metallb-system \
+  pod-security.kubernetes.io/enforce=privileged
+
+# Create IPAddressPool
+kubectl apply -f - <<'EOF'
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: default-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 192.168.50.50-192.168.50.250
+EOF
+
+# Create L2Advertisement
+kubectl apply -f - <<'EOF'
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: default-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - default-pool
+  interfaces:
+  - eth0
+EOF
+```
+
+### Verification Results
+
+```bash
+# Pods running
+$ kubectl get pods -n metallb-system
+NAME                                    READY   STATUS    RESTARTS   AGE
+my-metallb-controller-5d9c4cdb7f-xxxxx   1/1     Running   0          2h
+my-metallb-speaker-xxxxx                 4/4     Running   0          2h
+my-metallb-speaker-xxxxx                 4/4     Running   0          2h
+my-metallb-speaker-xxxxx                 4/4     Running   0          2h
+
+# IP pool configured
+$ kubectl get ipaddresspool -n metallb-system
+NAME           AUTO ASSIGN   AVOID BUGGY IPS   ADDRESSES
+default-pool   true          false             ["192.168.50.50-192.168.50.250"]
+
+# L2 advertisement active
+$ kubectl get l2advertisement -n metallb-system
+NAME         IPADDRESSPOOLS     INTERFACES
+default-l2   ["default-pool"]   ["eth0"]
+
+# LoadBalancer service in use
+$ kubectl get svc -n ingress-nginx
+NAME                                 TYPE           EXTERNAL-IP      PORT(S)
+ingress-nginx-controller             LoadBalancer   192.168.50.80    80:31234/TCP,443:31432/TCP
+```
+
+---
+
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)

@@ -2,6 +2,90 @@
 
 This guide walks you through deploying the NGINX Ingress Controller on a Talos Kubernetes cluster using Helm with MetalLB LoadBalancer integration.
 
+---
+
+## Installation Status - Current Deployment
+
+**Installation Date**: 2025-11-10
+**Status**: ✅ OPERATIONAL
+**Version**: Latest (Helm chart ingress-nginx/ingress-nginx)
+**Cluster**: Talos v1.11.1, Kubernetes v1.33.3
+
+### Current Configuration
+
+**LoadBalancer IP**: 192.168.50.80 (via MetalLB)
+**Ingress Class**: `nginx` (default)
+**Replicas**: 1
+**Metrics**: Enabled (port 10254, Prometheus compatible)
+
+### Components Running
+
+```
+Controller:   1/1
+```
+
+### Services
+
+```
+LoadBalancer: 192.168.50.80
+- HTTP:  80:31xxx/TCP
+- HTTPS: 443:31xxx/TCP
+Metrics: 10254/TCP (Prometheus)
+```
+
+### Ingress Resources
+
+- `harbor-ingress` - Harbor Container Registry (harbor.cloud.local)
+
+### Actual Installation Commands Used
+
+```bash
+# Add Helm repository
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+
+# Install NGINX Ingress Controller
+helm install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx \
+  --create-namespace \
+  --set controller.service.type=LoadBalancer \
+  --set controller.service.loadBalancerIP=192.168.50.80 \
+  --set controller.ingressClassResource.default=true \
+  --set controller.metrics.enabled=true
+```
+
+### Verification Results
+
+```bash
+# Controller pod running
+$ kubectl get pods -n ingress-nginx
+NAME                                       READY   STATUS    RESTARTS   AGE
+ingress-nginx-controller-xxxxx-xxxxx        1/1     Running   0          2h
+
+# LoadBalancer service assigned IP
+$ kubectl get service -n ingress-nginx
+NAME                                 TYPE           EXTERNAL-IP      PORT(S)                      AGE
+ingress-nginx-controller             LoadBalancer   192.168.50.80    80:31234/TCP,443:31432/TCP   2h
+ingress-nginx-controller-admission   ClusterIP      10.96.xxx.xxx    443/TCP                      2h
+
+# Ingress class available
+$ kubectl get ingressclass
+NAME    CONTROLLER             PARAMETERS   DEFAULT   AGE
+nginx   k8s.io/ingress-nginx   <none>       true      2h
+
+# Ingress resources
+$ kubectl get ingress -A
+NAMESPACE   NAME             CLASS   HOSTS                ADDRESS         PORTS     AGE
+harbor      harbor-ingress   nginx   harbor.cloud.local   192.168.50.80   80, 443   1h
+
+# Test connectivity
+$ curl -I http://192.168.50.80
+HTTP/1.1 404 Not Found
+Server: nginx
+```
+
+---
+
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)

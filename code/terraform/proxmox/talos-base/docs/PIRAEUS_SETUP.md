@@ -2,6 +2,201 @@
 
 This comprehensive guide walks you through setting up Piraeus Operator on a Talos Kubernetes cluster from scratch.
 
+---
+
+## Installation Status - Current Deployment
+
+**Installation Date**: 2025-11-10
+**Status**: ✅ OPERATIONAL
+**Version**: v2.9.1
+**Cluster**: Talos v1.11.1, Kubernetes v1.33.3
+
+### Current Configuration
+
+⚠️ **IMPORTANT**: This installation uses **ZFS + DRBD**, NOT LVM thin pools as described in the guide below. The `dm-thin-pool` kernel module is NOT available in the Talos image, but ZFS is available and works perfectly with DRBD.
+
+**Storage Backend**: **ZFS** (not LVM thin pools)
+**Replication**: **DRBD** (loaded and working)
+**LINSTOR Nodes**: 3/3 Online
+**Storage Pools**: pool1 on all nodes (ZFS)
+
+### Storage Capacity
+
+- **Per Node**: 496 GiB (ZFS pool on /dev/vdb)
+- **Total Raw**: ~1.5 TB
+- **With 2-way replication**: ~750 GB usable
+- **With 3-way replication**: ~500 GB usable
+
+### Components Running
+
+```
+Operator:              2/2
+Controller:            1/1
+Satellites:            3/3 (2 containers each)
+CSI Driver:            7/7
+HA Controllers:        3/3
+Affinity Controller:   1/1
+```
+
+### StorageClasses Created
+
+- `piraeus-storage-single` - 1 replica (no replication)
+- `piraeus-storage` - 2 replicas (default, 2-way DRBD)
+- `piraeus-storage-ha` - 3 replicas (3-way DRBD for critical data)
+
+### Actual Installation Commands Used
+
+```bash
+# Install Piraeus Operator
+kubectl apply --server-side -f https://github.com/piraeusdatastore/piraeus-operator/releases/latest/download/manifest.yaml
+
+# Apply Talos-specific configuration (remove systemd dependencies)
+kubectl apply -f - <<'EOF'
+apiVersion: piraeus.io/v1
+kind: LinstorSatelliteConfiguration
+metadata:
+  name: talos-loader-override
+spec:
+  podTemplate:
+    spec:
+      initContainers:
+        - name: drbd-shutdown-guard
+          $patch: delete
+        - name: drbd-module-loader
+          $patch: delete
+      volumes:
+        - name: run-systemd-system
+          $patch: delete
+        - name: run-drbd-shutdown-guard
+          $patch: delete
+        - name: systemd-bus-socket
+          $patch: delete
+        - name: lib-modules
+          $patch: delete
+        - name: usr-src
+          $patch: delete
+        - name: etc-lvm-backup
+          hostPath:
+            path: /var/etc/lvm/backup
+            type: DirectoryOrCreate
+        - name: etc-lvm-archive
+          hostPath:
+            path: /var/etc/lvm/archive
+            type: DirectoryOrCreate
+EOF
+
+# Deploy LinstorCluster
+kubectl apply -f - <<'EOF'
+apiVersion: piraeus.io/v1
+kind: LinstorCluster
+metadata:
+  name: linstorcluster
+spec: {}
+EOF
+
+# Create ZFS storage pools (NOT LVM thin pools)
+kubectl -n piraeus-datastore exec deploy/linstor-controller -- \
+  linstor physical-storage create-device-pool --pool-name pool1 zfs talos-control-01 /dev/vdb --storage-pool pool1
+
+kubectl -n piraeus-datastore exec deploy/linstor-controller -- \
+  linstor physical-storage create-device-pool --pool-name pool1 zfs talos-control-02 /dev/vdb --storage-pool pool1
+
+kubectl -n piraeus-datastore exec deploy/linstor-controller -- \
+  linstor physical-storage create-device-pool --pool-name pool1 zfs talos-control-03 /dev/vdb --storage-pool pool1
+
+# Create StorageClasses
+kubectl apply -f - <<'EOF'
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: piraeus-storage
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: linstor.csi.linbit.com
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  linstor.csi.linbit.com/storagePool: pool1
+  linstor.csi.linbit.com/placementCount: "2"
+  linstor.csi.linbit.com/autoPlace: "2"
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: piraeus-storage-ha
+provisioner: linstor.csi.linbit.com
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  linstor.csi.linbit.com/storagePool: pool1
+  linstor.csi.linbit.com/placementCount: "3"
+  linstor.csi.linbit.com/autoPlace: "3"
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: piraeus-storage-single
+provisioner: linstor.csi.linbit.com
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  linstor.csi.linbit.com/storagePool: pool1
+  linstor.csi.linbit.com/placementCount: "1"
+  linstor.csi.linbit.com/autoPlace: "1"
+EOF
+```
+
+### Verification Results
+
+```bash
+# LINSTOR nodes online
+$ kubectl -n piraeus-datastore exec deploy/linstor-controller -- linstor node list
+Node             | NodeType  | Addresses               | State
+talos-control-01 | SATELLITE | 192.168.50.95:3366      | Online
+talos-control-02 | SATELLITE | 192.168.50.94:3366      | Online
+talos-control-03 | SATELLITE | 192.168.50.93:3366      | Online
+
+# Storage pools (ZFS)
+$ kubectl -n piraeus-datastore exec deploy/linstor-controller -- linstor storage-pool list
+Node             | StoragePool | Provider | PoolName | FreeCapacity | TotalCapacity | SupportsSnapshots
+talos-control-01 | pool1       | ZFS      | pool1    | 496 GiB      | 496 GiB       | True
+talos-control-02 | pool1       | ZFS      | pool1    | 496 GiB      | 496 GiB       | True
+talos-control-03 | pool1       | ZFS      | pool1    | 496 GiB      | 496 GiB       | True
+
+# DRBD modules loaded
+$ kubectl -n piraeus-datastore exec daemonset/linstor-satellite.talos-control-01 -c linstor-satellite -- lsmod | grep drbd
+drbd                  561152  2
+drbd_transport_tcp     24576  0
+
+# ZFS module loaded
+$ kubectl -n piraeus-datastore exec daemonset/linstor-satellite.talos-control-01 -c linstor-satellite -- lsmod | grep zfs
+zfs                  6701056  0
+
+# StorageClasses
+$ kubectl get storageclass
+NAME                       PROVISIONER              RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE
+piraeus-storage (default)  linstor.csi.linbit.com   Delete          WaitForFirstConsumer   true                   2h
+piraeus-storage-ha         linstor.csi.linbit.com   Delete          WaitForFirstConsumer   true                   2h
+piraeus-storage-single     linstor.csi.linbit.com   Delete          WaitForFirstConsumer   true                   2h
+
+# Test PVC with DRBD replication
+$ kubectl -n piraeus-datastore exec deploy/linstor-controller -- linstor resource list
+ResourceName  | Node             | Port | Usage | Conns | State      | Layers
+test-pvc      | talos-control-01 | 7000 | InUse | Ok    | UpToDate   | DRBD,STORAGE
+test-pvc      | talos-control-02 | 7000 | InUse | Ok    | UpToDate   | DRBD,STORAGE
+```
+
+### Key Achievement
+
+**ZFS + DRBD Working!** No need for `dm-thin-pool` module. The ZFS backend with DRBD replication provides:
+- Native snapshot support
+- Better data integrity (checksums)
+- Compression support
+- Efficient copy-on-write
+- Block-level replication via DRBD
+
+---
+
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)

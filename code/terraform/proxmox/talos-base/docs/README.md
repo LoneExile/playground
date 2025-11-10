@@ -13,43 +13,79 @@ This directory contains comprehensive documentation for the Talos Kubernetes clu
 
 | Node | IP Address | Role | Status |
 |------|------------|------|--------|
-| talos-control-01 | 192.168.50.10 | Control Plane | Running |
-| talos-control-02 | 192.168.50.9 | Control Plane | Running |
-| talos-control-03 | 192.168.50.8 | Control Plane | Running |
+| talos-control-01 | 192.168.50.95 | Control Plane | Running |
+| talos-control-02 | 192.168.50.94 | Control Plane | Running |
+| talos-control-03 | 192.168.50.93 | Control Plane | Running |
 
 **VIP**: 192.168.50.100 (Kubernetes API endpoint)
 
 ## Installed Components
 
-### 1. Piraeus Operator (Storage)
+### 1. Cilium CNI (Network)
 
 **Status**: ✅ Operational
-**Documentation**: [PIRAEUS_SETUP.md](./PIRAEUS_SETUP.md)
+**Documentation**: [CILIUM_SETUP.md](./CILIUM_SETUP.md)
 
 **Configuration**:
-- Storage Pool: `pool1` (~500GB per node, 1.5TB total)
-- Storage Driver: LVM Thin Pools
-- Replication: DRBD-based block replication
-- StorageClasses:
-  - `piraeus-storage-single` - 1 replica (testing)
-  - `piraeus-storage` - 2-way replication (default)
-  - `piraeus-storage-ha` - 3-way replication (critical data)
+- Version: v1.18.3
+- Routing Mode: tunnel (VXLAN)
+- IPAM Mode: kubernetes
+- Kube-proxy Replacement: Enabled (eBPF)
+- Host Firewall: Enabled
+- Hubble: Disabled (resource optimization)
+- Envoy: Disabled
 
-**Nodes**:
+**Components**:
 ```
-talos-control-01: 500GB (Online)
-talos-control-02: 500GB (Online)
-talos-control-03: 500GB (Online)
+Cilium Agents:    3/3 Running
+Cilium Operators: 2/2 Running
+CoreDNS:          2/2 Running
 ```
 
 **Features**:
-- ✅ Block storage with DRBD replication
-- ✅ LVM thin provisioning
-- ✅ CSI driver for Kubernetes
-- ✅ Snapshot support
-- ✅ Volume expansion
+- ✅ eBPF-based networking
+- ✅ Kube-proxy replacement
+- ✅ Host firewall for security
+- ✅ External IPs support
+- ✅ NodePort services
+- ✅ Maglev load balancing
 
-### 2. MetalLB (LoadBalancer)
+### 2. Piraeus Operator (Storage)
+
+**Status**: ✅ Operational (ZFS + DRBD)
+**Documentation**: [PIRAEUS_SETUP.md](./PIRAEUS_SETUP.md)
+
+**Configuration**:
+- Version: v2.9.1
+- Storage Backend: **ZFS** (not LVM thin pools)
+- Replication: **DRBD** (2-way and 3-way)
+- LINSTOR Nodes: 3/3 Online
+- Storage Pools: `pool1` on all nodes (ZFS on /dev/vdb)
+
+**Components**:
+```
+Operator:              2/2 Running
+Controller:            1/1 Running
+Satellites:            3/3 Running (2 containers each)
+CSI Driver:            7/7 Running
+HA Controllers:        3/3 Running
+Affinity Controller:   1/1 Running
+```
+
+**Storage Capacity**:
+- Per Node: 496 GiB (ZFS pool on /dev/vdb)
+- Total Raw: ~1.5 TB
+- With 2-way replication: ~750 GB usable
+- With 3-way replication: ~500 GB usable
+
+**StorageClasses**:
+- `piraeus-storage-single` - 1 replica (no replication)
+- `piraeus-storage` - 2 replicas (default, 2-way DRBD)
+- `piraeus-storage-ha` - 3 replicas (3-way DRBD for critical data)
+
+**Key Achievement**: **ZFS + DRBD Working!** No need for `dm-thin-pool` module. ZFS provides native snapshots, checksums, compression, and DRBD provides block-level replication.
+
+### 3. MetalLB (LoadBalancer)
 
 **Status**: ✅ Operational
 **Documentation**: [METALLB_SETUP.md](./METALLB_SETUP.md)
@@ -71,43 +107,7 @@ Speakers:   3/3 Running (4 containers each)
 **IP Assignments**:
 - `192.168.50.80` - NGINX Ingress Controller
 
-### 3. NGINX Ingress Controller
-
-**Status**: ✅ Operational
-**Documentation**: [NGINX_INGRESS_SETUP.md](./NGINX_INGRESS_SETUP.md)
-
-**Configuration**:
-- Version: NGINX Ingress Controller 1.14.0 (Chart 4.14.0)
-- LoadBalancer IP: 192.168.50.80
-- Ingress Class: `nginx` (default)
-- Replicas: 2 (high availability)
-
-**Components**:
-```
-Controller Pods:  2/2 Running
-Admission Webhook: Running
-Metrics Endpoint:  Enabled (port 10254)
-```
-
-**Services**:
-```
-LoadBalancer:     192.168.50.80 (HTTP: 80, HTTPS: 443)
-Admission:        ClusterIP (internal)
-Metrics:          ClusterIP (Prometheus scraping)
-```
-
-**Features**:
-- ✅ HTTP/HTTPS routing
-- ✅ Host-based routing (virtual hosts)
-- ✅ Path-based routing
-- ✅ TLS/SSL termination
-- ✅ WebSocket support
-- ✅ Prometheus metrics
-- ✅ Single LoadBalancer IP for multiple services
-
-**Test Applications**:
-- `hello.local` → hello-world service (HTTPS enabled)
-- `goodbye.local` → goodbye-world service (HTTPS enabled)
+**Available IPs**: 200 IPs (192.168.50.50-79, 81-250)
 
 ### 4. Cert-Manager (Certificate Management)
 
@@ -127,9 +127,6 @@ Webhook:          1/1 Running
 CA Injector:      1/1 Running
 ```
 
-**Issued Certificates**:
-- `harbor.cloud.local` - 90-day certificate (includes core.harbor.cloud.local, notary.harbor.cloud.local)
-
 **Features**:
 - ✅ Self-signed CA infrastructure
 - ✅ Automated certificate issuance
@@ -142,63 +139,136 @@ CA Injector:      1/1 Running
 - Location: `docs/talos-ca.crt`
 - Import to macOS: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain docs/talos-ca.crt`
 
-### 5. Harbor Container Registry
+### 5. NGINX Ingress Controller
+
+**Status**: ✅ Operational
+**Documentation**: [NGINX_INGRESS_SETUP.md](./NGINX_INGRESS_SETUP.md)
+
+**Configuration**:
+- Version: NGINX Ingress Controller (Helm chart)
+- LoadBalancer IP: 192.168.50.80 (via MetalLB)
+- Ingress Class: `nginx` (default)
+- Replicas: 1
+
+**Components**:
+```
+Controller Pods:  1/1 Running
+Admission Webhook: Running
+Metrics Endpoint:  Enabled (port 10254)
+```
+
+**Services**:
+```
+LoadBalancer:     192.168.50.80 (HTTP: 80, HTTPS: 443)
+Admission:        ClusterIP (internal)
+Metrics:          ClusterIP (Prometheus scraping)
+```
+
+**Features**:
+- ✅ HTTP/HTTPS routing
+- ✅ Host-based routing (virtual hosts)
+- ✅ Path-based routing
+- ✅ TLS/SSL termination (via cert-manager)
+- ✅ WebSocket support
+- ✅ Prometheus metrics
+- ✅ Single LoadBalancer IP for multiple services
+
+### 6. Harbor Container Registry
 
 **Status**: ✅ Operational
 **Documentation**: [HARBOR_SETUP.md](./HARBOR_SETUP.md)
 
 **Configuration**:
-- Access URL: https://harbor.cloud.local
-- Ingress: NGINX Ingress Controller
-- Certificate: Self-signed (via cert-manager)
-- Default Credentials: admin / Harbor12345
+- Version: Latest (Helm chart harbor/harbor)
+- URL: https://harbor.cloud.local
+- Ingress IP: 192.168.50.80 (via MetalLB)
+- Admin Password: Harbor12345
+- TLS: Enabled (cert-manager with self-signed CA)
 
 **Components**:
 ```
-Harbor Core:      1/1 Running
-Harbor Portal:    1/1 Running
-Harbor Registry:  2/2 Running
-PostgreSQL:       1/1 Running
-Redis:            1/1 Running
-Jobservice:       1/1 Running
-Trivy Scanner:    1/1 Running
+harbor-core:          1/1 Running (API & Web UI)
+harbor-portal:        1/1 Running (Frontend)
+harbor-registry:      2/2 Running (Docker Distribution)
+harbor-database:      1/1 Running (PostgreSQL)
+harbor-redis:         1/1 Running (Cache)
+harbor-jobservice:    1/1 Running (Background Jobs)
+harbor-trivy:         1/1 Running (Vulnerability Scanner)
 ```
 
-**Storage Allocated (Piraeus)**:
+**Persistent Storage** (Piraeus ZFS+DRBD 2-way):
 ```
-Registry:     20Gi (2-way replication)
-Database:      5Gi (2-way replication)
-Redis:         1Gi (2-way replication)
-Jobservice:    1Gi (2-way replication)
-Trivy:         5Gi (2-way replication)
-Total:        32Gi
+Registry:    20Gi (40Gi with replication)
+Database:     5Gi (10Gi with replication)
+Redis:        1Gi (2Gi with replication)
+Jobservice:   1Gi (2Gi with replication)
+Trivy:        5Gi (10Gi with replication)
+Total:       32Gi (~64Gi with replication)
 ```
 
-**Features**:
-- ✅ Container image registry
-- ✅ Vulnerability scanning (Trivy)
-- ✅ RBAC and project management
-- ✅ Image replication
-- ✅ HTTPS with self-signed certificate
-- ✅ Webhook notifications
-- ✅ Audit logging
+**Access**:
+1. Add to /etc/hosts: `192.168.50.80 harbor.cloud.local`
+2. Trust CA: `sudo security add-trusted-cert -k /Library/Keychains/System.keychain docs/talos-ca.crt`
+3. Web UI: https://harbor.cloud.local
+4. Login: admin / Harbor12345
+5. Docker: `docker login harbor.cloud.local`
 
-**Quick Start**:
-```bash
-# Add to /etc/hosts
-echo "192.168.50.80 harbor.cloud.local" | sudo tee -a /etc/hosts
+## Architecture Diagram
 
-# Configure Docker
-sudo mkdir -p /etc/docker/certs.d/harbor.cloud.local
-sudo cp docs/talos-ca.crt /etc/docker/certs.d/harbor.cloud.local/ca.crt
+```
+                                    Internet
+                                       |
+                      +----------------+----------------+
+                      |                                 |
+                [192.168.50.0/24 Network]
+                      |
+         +------------+------------+------------+
+         |            |            |            |
+    VIP: 192.168.50.100      192.168.50.50-250
+         |                    (MetalLB Pool)
+         |                         |
+    +----+----+              192.168.50.80
+    |         |              (NGINX Ingress with HTTPS)
+    | Talos   |
+    | Control |         +------------------------+
+    | Plane   |         |  Storage Layer         |
+    |         |         |  (Piraeus/LINSTOR)     |
+    | Nodes   |         |                        |
+    +---------+         |  ✅ ZFS + DRBD         |
+    |         |         |  ~1.5 TB (3x 500GB)    |
+    | 3 nodes |         |  2-way replication     |
+    |         |         +------------------------+
+    +---------+
+         |
+    +----+----+
+    |         |
+    | Pods &  |
+    | Services|
+    |         |
+    +---------+
+    - Cilium CNI (eBPF networking)
+    - NGINX Ingress Controller
+    - Cert-Manager (CA + Certificates)
+    - MetalLB Speakers
+    - Piraeus Components
+    - Harbor Container Registry
+    - System Workloads
+```
 
-# Login
-docker login harbor.cloud.local
-# Username: admin, Password: Harbor12345
+## Network Architecture
 
-# Push an image
-docker tag nginx:alpine harbor.cloud.local/library/nginx:alpine
-docker push harbor.cloud.local/library/nginx:alpine
+```
+192.168.50.0/24 Network
+│
+├─ 192.168.50.93    → talos-control-03
+├─ 192.168.50.94    → talos-control-02
+├─ 192.168.50.95    → talos-control-01
+├─ 192.168.50.100   → Kubernetes VIP (kube-apiserver)
+│
+└─ 192.168.50.50-250 → MetalLB IP Pool
+   │
+   ├─ 192.168.50.80  → NGINX Ingress Controller (HTTP/HTTPS)
+   └─ 192.168.50.50-79, 81-250 → Available for services
 ```
 
 ## Quick Access
@@ -209,53 +279,14 @@ export KUBECONFIG=/path/to/kubeconfig
 kubectl get nodes
 ```
 
-### Harbor Container Registry
-```bash
-# Add to /etc/hosts
-echo "192.168.50.80 harbor.cloud.local" | sudo tee -a /etc/hosts
-
-# Trust the CA certificate (macOS)
-sudo security add-trusted-cert -d -r trustRoot \
-  -k /Library/Keychains/System.keychain \
-  docs/talos-ca.crt
-
-# Configure Docker to trust the CA
-sudo mkdir -p /etc/docker/certs.d/harbor.cloud.local
-sudo cp docs/talos-ca.crt /etc/docker/certs.d/harbor.cloud.local/ca.crt
-
-# Access Web UI
-https://harbor.cloud.local
-# Username: admin, Password: Harbor12345
-
-# Login with Docker
-docker login harbor.cloud.local
-
-# Push an image
-docker tag nginx:alpine harbor.cloud.local/library/nginx:alpine
-docker push harbor.cloud.local/library/nginx:alpine
-```
-
-### NGINX Ingress Controller with HTTPS
+### NGINX Ingress Controller
 ```bash
 # Access URLs
-http://192.168.50.80   # HTTP (redirects to HTTPS)
-https://192.168.50.80  # HTTPS
+http://192.168.50.80   # HTTP
+https://192.168.50.80  # HTTPS (requires cert-manager and certificate)
 
-# Add to /etc/hosts
-echo "192.168.50.80 hello.local goodbye.local" | sudo tee -a /etc/hosts
-
-# Trust the CA certificate (macOS)
-sudo security add-trusted-cert -d -r trustRoot \
-  -k /Library/Keychains/System.keychain \
-  docs/talos-ca.crt
-
-# Then access via browser (HTTPS)
-https://hello.local
-https://goodbye.local
-
-# Test with curl (after trusting CA)
-curl https://hello.local
-curl https://goodbye.local
+# Test connectivity
+curl http://192.168.50.80
 ```
 
 ### Create Your Own Ingress with HTTPS
@@ -303,111 +334,6 @@ spec:
               number: 80
 ```
 
-## Architecture Diagram
-
-```
-                                    Internet
-                                       |
-                      +----------------+----------------+
-                      |                                 |
-                [192.168.50.0/24 Network]
-                      |
-         +------------+------------+------------+
-         |            |            |            |
-    VIP: 192.168.50.100      192.168.50.50-250
-         |                    (MetalLB Pool)
-         |                         |
-    +----+----+              192.168.50.80
-    |         |              (NGINX Ingress with HTTPS)
-    | Talos   |
-    | Control |         +------------------------+
-    | Plane   |         |  Storage Layer         |
-    |         |         |  (Piraeus/DRBD)        |
-    | Nodes   |         |                        |
-    +---------+         |  pool1: 500GB × 3      |
-    |         |         |  DRBD Replication      |
-    | 1, 2, 3 |<------->|  2-way / 3-way         |
-    |         |         +------------------------+
-    +---------+
-         |
-    +----+----+
-    |         |
-    | Pods &  |
-    | Services|
-    |         |
-    +---------+
-    - NGINX Ingress Controller
-    - Cert-Manager (CA + Certificates)
-    - Harbor Container Registry
-    - Piraeus Components
-    - MetalLB Speakers
-    - System Workloads
-```
-
-## Storage Architecture
-
-```
-                       Piraeus Operator
-                             |
-              +--------------+--------------+
-              |              |              |
-         Node 01         Node 02        Node 03
-       (500GB pool1)   (500GB pool1)  (500GB pool1)
-              |              |              |
-              +------DRBD----+------DRBD----+
-                    (Replication)
-
-Storage Classes:
-- piraeus-storage-single → 1 replica (1 node)
-- piraeus-storage (default) → 2 replicas (2 nodes)
-- piraeus-storage-ha → 3 replicas (all 3 nodes)
-
-Current Usage:
-- System volumes for cluster components
-- Ready for application persistent volumes
-- ~1.5TB total capacity available
-```
-
-## Network Architecture
-
-```
-192.168.50.0/24 Network
-│
-├─ 192.168.50.8     → talos-control-03
-├─ 192.168.50.9     → talos-control-02
-├─ 192.168.50.10    → talos-control-01
-├─ 192.168.50.100   → Kubernetes VIP (kube-apiserver)
-│
-└─ 192.168.50.50-250 → MetalLB IP Pool
-   │
-   ├─ 192.168.50.80  → NGINX Ingress Controller (HTTP/HTTPS)
-   │                    └─ harbor.cloud.local (Harbor Registry - HTTPS)
-   └─ 192.168.50.50-79, 81-250 → Available for services
-```
-
-## Resource Utilization
-
-### Storage Breakdown
-```
-Total Storage: 1500GB (500GB × 3 nodes)
-
-Allocated:
-- System volumes:      ~10GB
-- Harbor Registry:     ~32GB (20GB registry, 5GB DB, 5GB Trivy, 2GB misc)
-
-Available: ~1458GB
-```
-
-### IP Address Allocation
-```
-Total MetalLB IPs: 201 (192.168.50.50-250)
-
-Assigned:
-- NGINX Ingress: 192.168.50.80
-
-Available: 200 IPs
-```
-
 ## Common Operations
 
 ### Check Cluster Status
@@ -417,10 +343,6 @@ kubectl get nodes -o wide
 
 # All pods
 kubectl get pods -A
-
-# Storage
-kubectl get pvc -A
-kubectl get sc
 
 # MetalLB
 kubectl get ipaddresspool -n metallb-system
@@ -434,57 +356,11 @@ kubectl get ingress -A
 kubectl get pods -n cert-manager
 kubectl get certificates -A
 kubectl get clusterissuer
-```
 
-### Check Piraeus Storage
-```bash
-# LINSTOR nodes
+# Piraeus
+kubectl get pods -n piraeus-datastore
 kubectl -n piraeus-datastore exec deploy/linstor-controller -- linstor node list
-
-# Storage pools
 kubectl -n piraeus-datastore exec deploy/linstor-controller -- linstor storage-pool list
-
-# Resources/volumes
-kubectl -n piraeus-datastore exec deploy/linstor-controller -- linstor resource list
-```
-
-### NGINX Ingress Operations
-```bash
-# Check NGINX Ingress status
-kubectl get pods -n ingress-nginx
-kubectl get svc -n ingress-nginx
-
-# View ingress controller logs
-kubectl logs -n ingress-nginx -l app.kubernetes.io/component=controller -f
-
-# Check all ingress resources
-kubectl get ingress -A
-
-# Test ingress connectivity
-curl -H "Host: hello.local" http://192.168.50.80
-curl -k https://hello.local
-```
-
-### Cert-Manager Operations
-```bash
-# Check cert-manager status
-kubectl get pods -n cert-manager
-
-# View all certificates
-kubectl get certificates -A
-
-# Check certificate details
-kubectl describe certificate hello-cert -n default
-
-# View cert-manager logs
-kubectl logs -n cert-manager -l app=cert-manager -f
-
-# Check ClusterIssuer status
-kubectl get clusterissuer ca-issuer -o yaml
-
-# Force certificate renewal
-kubectl delete secret hello-tls-secret -n default
-# Cert-manager will automatically recreate it
 ```
 
 ### MetalLB Operations
@@ -500,6 +376,44 @@ kubectl logs -n metallb-system daemonset/speaker
 # Check assigned IPs
 kubectl get services -A -o json | \
   jq -r '.items[] | select(.spec.type=="LoadBalancer") | "\(.metadata.name)\t\(.status.loadBalancer.ingress[0].ip)"'
+```
+
+### NGINX Ingress Operations
+```bash
+# Check NGINX Ingress status
+kubectl get pods -n ingress-nginx
+kubectl get svc -n ingress-nginx
+
+# View ingress controller logs
+kubectl logs -n ingress-nginx -l app.kubernetes.io/component=controller -f
+
+# Check all ingress resources
+kubectl get ingress -A
+
+# Test ingress connectivity
+curl -I http://192.168.50.80
+```
+
+### Cert-Manager Operations
+```bash
+# Check cert-manager status
+kubectl get pods -n cert-manager
+
+# View all certificates
+kubectl get certificates -A
+
+# Check certificate details
+kubectl describe certificate <cert-name> -n <namespace>
+
+# View cert-manager logs
+kubectl logs -n cert-manager -l app=cert-manager -f
+
+# Check ClusterIssuer status
+kubectl get clusterissuer ca-issuer -o yaml
+
+# Force certificate renewal
+kubectl delete secret <tls-secret-name> -n <namespace>
+# Cert-manager will automatically recreate it
 ```
 
 ## Backup Recommendations
@@ -520,6 +434,7 @@ kubectl get secret ca-secret -n cert-manager -o yaml > ca-secret-backup.yaml
 ```bash
 # Backup self-signed CA certificate and key
 cp docs/talos-ca.crt backups/
+cp ca.key backups/
 kubectl get secret ca-secret -n cert-manager -o yaml > backups/ca-secret.yaml
 
 # Backup ClusterIssuer configuration
@@ -533,19 +448,6 @@ kubectl get ingress -A -o yaml > backups/ingress-backup.yaml
 
 # Backup all certificates
 kubectl get certificates -A -o yaml > backups/certificates-backup.yaml
-
-# Backup NGINX Ingress configuration
-helm get values my-ingress-nginx -n ingress-nginx > backups/nginx-values.yaml
-```
-
-### 4. Persistent Volumes
-```bash
-# Using Piraeus snapshots
-kubectl -n piraeus-datastore exec deploy/linstor-controller -- \
-  linstor snapshot create <resource-name> backup-$(date +%Y%m%d)
-
-# Using velero (if installed)
-velero backup create full-backup --include-namespaces ingress-nginx,cert-manager
 ```
 
 ## Monitoring and Maintenance
@@ -554,12 +456,11 @@ velero backup create full-backup --include-namespaces ingress-nginx,cert-manager
 
 **Daily**:
 - Check all pods are running: `kubectl get pods -A | grep -v Running`
-- Check PVC status: `kubectl get pvc -A | grep -v Bound`
 - Check node status: `kubectl get nodes`
+- Check LoadBalancer IPs: `kubectl get svc -A | grep LoadBalancer`
 
 **Weekly**:
 - Check certificate expiration dates: `kubectl get certificates -A`
-- Check Piraeus storage pool capacity
 - Review MetalLB IP allocation
 - Review NGINX Ingress logs for errors
 - Update Helm repositories: `helm repo update`
@@ -569,7 +470,6 @@ velero backup create full-backup --include-namespaces ingress-nginx,cert-manager
 - Check for component updates (Helm charts)
 - Review and rotate credentials
 - Test disaster recovery procedures
-- Review ingress access logs
 
 ### Upgrade Paths
 
@@ -578,16 +478,20 @@ velero backup create full-backup --include-namespaces ingress-nginx,cert-manager
 - Upgrade one node at a time
 - Verify cluster health between upgrades
 
-**Piraeus**:
+**Cilium**:
 ```bash
-kubectl apply -f https://github.com/piraeusdatastore/piraeus-operator/releases/latest/download/manifest.yaml
+helm repo update
+helm upgrade cilium cilium/cilium \
+  --version <new-version> \
+  --namespace kube-system \
+  --reuse-values
 ```
 
 **MetalLB**:
 ```bash
 helm repo update
 helm upgrade my-metallb metallb/metallb \
-  --version NEW_VERSION \
+  --version <new-version> \
   --namespace metallb-system \
   --reuse-values
 ```
@@ -595,7 +499,7 @@ helm upgrade my-metallb metallb/metallb \
 **NGINX Ingress**:
 ```bash
 helm repo update
-helm upgrade my-ingress-nginx ingress-nginx/ingress-nginx \
+helm upgrade ingress-nginx ingress-nginx/ingress-nginx \
   --namespace ingress-nginx \
   --reuse-values
 ```
@@ -608,14 +512,19 @@ helm upgrade cert-manager jetstack/cert-manager \
   --reuse-values
 ```
 
+**Piraeus**:
+```bash
+kubectl apply --server-side -f https://github.com/piraeusdatastore/piraeus-operator/releases/latest/download/manifest.yaml
+```
+
 ## Troubleshooting
 
 ### Common Issues
 
-**PVC Stuck in Pending**:
-1. Check Piraeus satellites: `kubectl get pods -n piraeus-datastore`
-2. Check storage pools: `kubectl -n piraeus-datastore exec deploy/linstor-controller -- linstor storage-pool list`
-3. Check CSI driver: `kubectl get pods -n piraeus-datastore | grep csi`
+**Pods in Pending State**:
+1. Check node resources: `kubectl describe nodes`
+2. Check events: `kubectl get events -A --sort-by='.lastTimestamp'`
+3. Check for taints: `kubectl describe nodes | grep -A 5 "Taints:"`
 
 **LoadBalancer Service No External IP**:
 1. Check MetalLB pods: `kubectl get pods -n metallb-system`
@@ -627,21 +536,14 @@ helm upgrade cert-manager jetstack/cert-manager \
 1. Check NGINX pods: `kubectl get pods -n ingress-nginx`
 2. Check LoadBalancer IP: `kubectl get svc -n ingress-nginx ingress-nginx-controller`
 3. Check ingress resources: `kubectl get ingress -A`
-4. Verify DNS/hosts entry: `cat /etc/hosts | grep hello.local`
-5. Check controller logs: `kubectl logs -n ingress-nginx -l app.kubernetes.io/component=controller`
+4. Check controller logs: `kubectl logs -n ingress-nginx -l app.kubernetes.io/component=controller`
 
 **HTTPS Certificate Issues**:
 1. Check certificate status: `kubectl get certificates -A`
 2. Check cert-manager logs: `kubectl logs -n cert-manager -l app=cert-manager`
-3. Check TLS secret: `kubectl get secret hello-tls-secret -n default`
+3. Check TLS secret: `kubectl get secret <tls-secret-name> -n <namespace>`
 4. Verify CA is trusted on client machine
 5. Check ClusterIssuer: `kubectl get clusterissuer ca-issuer`
-
-**Storage Full**:
-1. Check usage: `kubectl -n piraeus-datastore exec deploy/linstor-controller -- linstor storage-pool list`
-2. Delete unused PVCs: `kubectl get pvc -A`
-3. Consider expanding storage pools
-4. Check for orphaned volumes
 
 ## Security Considerations
 
@@ -649,19 +551,20 @@ helm upgrade cert-manager jetstack/cert-manager \
 
 **✅ Implemented**:
 - RBAC enabled in Kubernetes
-- Network policies (Talos default)
+- Network policies (Cilium default)
 - Encrypted etcd
-- Piraeus volumes encrypted at rest
-- HTTPS/TLS for all ingress traffic
+- HTTPS/TLS for ingress traffic
 - Self-signed CA infrastructure
 - Automated certificate management
 - Certificate auto-renewal (cert-manager)
+- Cilium host firewall enabled
+- eBPF-based security policies
 
 **⚠️ Needs Improvement**:
 - Self-signed CA (consider Let's Encrypt for public domains)
 - No external authentication (consider OIDC/LDAP)
 - No network policies for applications
-- Test applications running (should remove in production)
+- Storage encryption (requires Piraeus storage pools)
 
 **🔒 Recommended Actions**:
 1. Replace self-signed CA with Let's Encrypt for public domains
@@ -669,8 +572,8 @@ helm upgrade cert-manager jetstack/cert-manager \
 3. Enable audit logging
 4. Set up backup and disaster recovery
 5. Configure monitoring and alerting (Prometheus/Grafana)
-6. Remove test applications before production use
-7. Implement pod security policies/standards
+6. Implement pod security policies/standards
+7. Configure Piraeus storage pools with encryption
 
 ## Future Enhancements
 
@@ -688,18 +591,24 @@ helm upgrade cert-manager jetstack/cert-manager \
 
 **Current Capacity**:
 - Nodes: 3 control-plane nodes (can add workers)
-- Storage: ~1490GB available (1.5TB total)
+- Storage: ~1.5 TB raw capacity (ZFS + DRBD)
+  - 2-way replication: ~750 GB usable
+  - Currently used: ~64 GB
+  - Available: ~686 GB
 - IPs: 200 LoadBalancer IPs available (1 in use)
+- Total Pods: 48 running
 
 **Expansion Options**:
 - Add dedicated worker nodes
-- Add more storage disks to existing nodes
+- Add additional storage disks to nodes
 - Expand MetalLB IP pool
 - Deploy to multiple availability zones
+- Expand storage pools for more capacity
 
 ## References
 
 - [Talos Linux Documentation](https://www.talos.dev/)
+- [Cilium Documentation](https://docs.cilium.io/)
 - [Piraeus Operator Documentation](https://github.com/piraeusdatastore/piraeus-operator/blob/v2/docs/README.md)
 - [MetalLB Documentation](https://metallb.universe.tf/)
 - [NGINX Ingress Controller Documentation](https://kubernetes.github.io/ingress-nginx/)
@@ -710,15 +619,17 @@ helm upgrade cert-manager jetstack/cert-manager \
 
 | Date | Component | Version | Notes |
 |------|-----------|---------|-------|
-| 2025-11-04 | Piraeus | v2.9.1 | Initial deployment with 3-way replication |
-| 2025-11-04 | MetalLB | v0.15.2 | Initial L2 mode deployment (manifest-based) |
-| 2025-11-06 | MetalLB | v0.15.2 | Migrated to Helm chart, fixed eth0 interface issue |
-| 2025-11-06 | NGINX Ingress | v1.14.0 | Deployed with LoadBalancer (192.168.50.80) |
-| 2025-11-06 | Cert-Manager | v1.13.3 | Self-signed CA with automated certificate management |
-| 2025-11-06 | Harbor | 2.14.0 | Deployed then removed (not needed) |
+| 2025-11-10 | Cilium | v1.18.3 | Initial deployment with kube-proxy replacement |
+| 2025-11-10 | Piraeus | v2.9.1 | Deployed with ZFS + DRBD (2-way replication) |
+| 2025-11-10 | MetalLB | v0.15.2 | Helm-based deployment with L2 mode |
+| 2025-11-10 | Cert-Manager | v1.13.3 | Self-signed CA with automated certificate management |
+| 2025-11-10 | NGINX Ingress | Latest | Deployed with LoadBalancer (192.168.50.80) |
+| 2025-11-10 | Harbor | Latest | Container registry with 32Gi storage (64Gi with replication) |
 
 ---
 
-**Last Updated**: 2025-11-06
-**Cluster Status**: ✅ Fully Operational with HTTPS
-**Next Review**: 2025-11-13
+**Last Updated**: 2025-11-10
+**Cluster Status**: ✅ Production Ready
+**Total Installation Time**: ~30 minutes
+**Storage Allocated**: ~64GB (with 2-way replication)
+**Available Storage**: ~686GB (with 2-way replication)

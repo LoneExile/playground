@@ -2,6 +2,108 @@
 
 This guide walks you through deploying cert-manager and configuring self-signed certificates for HTTPS access on your NGINX Ingress Controller.
 
+---
+
+## Installation Status - Current Deployment
+
+**Installation Date**: 2025-11-10
+**Status**: ✅ OPERATIONAL
+**Version**: v1.13.3
+**Cluster**: Talos v1.11.1, Kubernetes v1.33.3
+
+### Current Configuration
+
+**CA Type**: Self-signed (4096-bit RSA, 10-year validity)
+**ClusterIssuer**: `ca-issuer`
+**Certificate Validity**: 90 days (auto-renewal at 75 days before expiry)
+
+### Components Running
+
+```
+Controller:       1/1
+Webhook:          1/1
+CA Injector:      1/1
+```
+
+### CA Certificate
+
+**Location**: `docs/talos-ca.crt` (also available as `ca.crt` in project root)
+**Subject**: CN=Talos Local CA, O=Talos Cluster, C=US
+**Validity**: 10 years (expires 2035-11-08)
+
+**Trust CA on macOS**:
+```bash
+sudo security add-trusted-cert -k /Library/Keychains/System.keychain docs/talos-ca.crt
+```
+
+**Trust CA on Linux**:
+```bash
+sudo cp docs/talos-ca.crt /usr/local/share/ca-certificates/talos-ca.crt
+sudo update-ca-certificates
+```
+
+### Certificates Issued
+
+- `harbor-cert` - Harbor Container Registry (harbor.cloud.local)
+
+### Actual Installation Commands Used
+
+```bash
+# Install CRDs
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.3/cert-manager.crds.yaml
+
+# Install cert-manager
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  --version v1.13.3
+
+# Create self-signed CA
+openssl genrsa -out ca.key 4096
+openssl req -new -x509 -sha256 -days 3650 -key ca.key -out ca.crt \
+  -subj "/CN=Talos Local CA/O=Talos Cluster/C=US"
+
+# Create CA secret
+kubectl create secret tls ca-secret --cert=ca.crt --key=ca.key -n cert-manager
+
+# Create ClusterIssuer
+kubectl apply -f - <<'EOF'
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: ca-issuer
+spec:
+  ca:
+    secretName: ca-secret
+EOF
+```
+
+### Verification Results
+
+```bash
+# Cert-manager pods
+$ kubectl get pods -n cert-manager
+NAME                                       READY   STATUS    RESTARTS   AGE
+cert-manager-5d7f9c8c9b-xxxxx               1/1     Running   0          2h
+cert-manager-cainjector-5d8c5d5f8c-xxxxx    1/1     Running   0          2h
+cert-manager-webhook-7d9b8c9d8f-xxxxx       1/1     Running   0          2h
+
+# ClusterIssuer ready
+$ kubectl get clusterissuer
+NAME        READY   AGE
+ca-issuer   True    2h
+
+# Certificates issued
+$ kubectl get certificates -A
+NAMESPACE   NAME          READY   SECRET              AGE
+default     harbor-cert   True    harbor-tls-secret   1h
+```
+
+---
+
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)

@@ -1,0 +1,101 @@
+# harbor-values.yaml
+expose:
+  type: ingress
+  tls:
+    enabled: true
+    certSource: secret
+    secret:
+      secretName: harbor-tls-secret
+  ingress:
+    hosts:
+      core: harbor.cloud.local
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: ca-issuer
+
+externalURL: https://harbor.cloud.local
+
+# Use Piraeus storage
+persistence:
+  enabled: true
+  persistentVolumeClaim:
+    registry:
+      storageClass: piraeus-storage
+      size: 20Gi
+    chartmuseum:
+      storageClass: piraeus-storage
+      size: 5Gi
+    jobservice:
+      jobLog:
+        storageClass: piraeus-storage
+        size: 1Gi
+    database:
+      storageClass: piraeus-storage
+      size: 5Gi
+    redis:
+      storageClass: piraeus-storage
+      size: 1Gi
+    trivy:
+      storageClass: piraeus-storage
+      size: 5Gi
+
+# Resource limits
+core:
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+jobservice:
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+registry:
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+database:
+  internal:
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 500m
+
+redis:
+  internal:
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 500m
+
+trivy:
+  enabled: true
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+# Default admin password (change after first login)
+harborAdminPassword: Harbor12345
