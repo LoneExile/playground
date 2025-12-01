@@ -1,0 +1,58 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+.terraform.tfstate.lock.info
+
+# Terragrunt
+.terragrunt-cache/
+**/.terragrunt-cache/
+live/state/
+
+# Terragrunt generated files (regenerated on each run)
+**/backend.tf
+**/providers.tf
+**/common_variables.tf
+
+# Kubernetes and Talos sensitive files
+kubeconfig
+secrets.yaml
+*.kubeconfig
+
+# Environment files with secrets
+.env
+.env.*
+
+# SSH keys and certificates
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# macOS
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Backup files
+*.bak
+*.backup
