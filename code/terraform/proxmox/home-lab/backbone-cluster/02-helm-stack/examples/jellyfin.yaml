@@ -98,7 +98,11 @@ spec:
             limits:   {cpu: "4",  memory: 4Gi}
           volumeMounts:
             - {name: nas, mountPath: /config, subPath: config/jelly/config}
-            - {name: nas, mountPath: /cache,  subPath: config/jelly/cache}
+            # /cache is transcode scratch + image cache — ephemeral by nature,
+            # rebuilds on restart. Keeping it on NFS was causing heavy writes to
+            # stall kubelet/containerd when the NAS was busy. emptyDir sits on
+            # worker's local disk (LVM thin on SSD-01) — much faster, NFS stays quiet.
+            - {name: cache, mountPath: /cache}
             - {name: nas, mountPath: /media/movies, subPath: home/movie}
             - {name: nas, mountPath: /media/series, subPath: home/series}
             # Intel Quick Sync via VAAPI. Enable in Jellyfin admin:
@@ -119,6 +123,10 @@ spec:
         - name: nas
           persistentVolumeClaim:
             claimName: jellyfin-nas
+        # Ephemeral cache — up to 8 Gi of transcode scratch before eviction.
+        - name: cache
+          emptyDir:
+            sizeLimit: 8Gi
         - name: dri
           hostPath:
             path: /dev/dri

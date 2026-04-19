@@ -190,9 +190,15 @@ variable "cpu_cores" {
 }
 
 variable "memory_mb" {
-  description = "RAM per VM in MB"
+  description = "RAM per controlplane VM in MB"
   type        = number
   default     = 8192
+}
+
+variable "worker_memory_mb" {
+  description = "RAM per worker VM in MB (workers run heavier apps)"
+  type        = number
+  default     = 16384
 }
 
 variable "os_disk_size" {

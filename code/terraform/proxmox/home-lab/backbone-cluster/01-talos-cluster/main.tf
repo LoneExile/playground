@@ -375,7 +375,7 @@ resource "proxmox_virtual_environment_vm" "worker" {
   }
 
   memory {
-    dedicated = var.memory_mb
+    dedicated = var.worker_memory_mb
   }
 
   disk {
