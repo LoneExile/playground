@@ -1,0 +1,64 @@
+# Cilium configuration for Talos OS
+# helm install cilium cilium/cilium -n kube-system --version 1.19.3 -f cilium.yaml
+
+routingMode: tunnel
+tunnelProtocol: vxlan
+tunnelPort: 8473
+
+ipam:
+  mode: "kubernetes"
+
+kubeProxyReplacement: true
+
+hostFirewall:
+  enabled: true
+
+hubble:
+  enabled: false
+
+externalIPs:
+  enabled: true
+
+nodePort:
+  enabled: true
+
+loadBalancer:
+  algorithm: maglev
+
+envoy:
+  enabled: true
+
+# Requires Gateway API CRDs installed first:
+#   kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+gatewayAPI:
+  enabled: true
+
+# Talos KubePrism — bypasses kube-proxy for in-cluster apiserver access
+k8sServiceHost: localhost
+k8sServicePort: 7445
+
+# Capabilities required for Talos (cap_sys_admin, etc. are not granted by default)
+securityContext:
+  capabilities:
+    ciliumAgent:
+      - CHOWN
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - IPC_LOCK
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cleanCiliumState:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+
+# Talos manages cgroup mount, so disable Cilium's automount
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup

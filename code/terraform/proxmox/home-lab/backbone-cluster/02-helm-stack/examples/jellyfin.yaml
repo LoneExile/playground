@@ -1,0 +1,156 @@
+# Jellyfin — media server.
+# Reuses the old /config/jelly/{config,cache} on the NAS so library + metadata
+# survive the cluster rebuild. Your 101 movies + 144 series mount in via
+# /media/movies and /media/series.
+#
+# Differences vs the old Rockchip manifest:
+#   - Image: official jellyfin/jellyfin:latest (amd64) instead of
+#     nyanmisaka/jellyfin:latest-rockchip (Rockchip-only)
+#   - Hardware transcoding: left disabled. Your Talos VMs don't have GPU
+#     passthrough from Proxmox, so decode/encode runs on CPU. To enable later,
+#     pass /dev/dri into the VMs, then uncomment the hardware-acceleration
+#     block below.
+#   - No more /dev/{dma_heap,mali0,rga,mpp_service} — Rockchip-specific.
+#   - Service: LoadBalancer (MetalLB) so it gets a 10.0.10.210–230 IP.
+#
+# Apply:
+#   kubectl apply -f jellyfin.yaml
+#   kubectl -n jellyfin get svc
+# Wait ~30s for the server to start, then browse to http://<ExternalIP>:8096
+# and complete the setup wizard (point the Movies library at /media/movies,
+# Shows at /media/series).
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jellyfin
+  labels:
+    # privileged required for hostPath mount of /dev/dri (VAAPI transcoding)
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+---
+# Static PV pointing at the same NFS share root — separate PV from
+# filebrowser's so each namespace gets its own PVC binding.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: jellyfin-nas
+spec:
+  capacity: {storage: 15Ti}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - nfsvers=4.1
+    - nolock
+    - noatime
+  nfs:
+    server: 192.168.1.179
+    path: /zpool1/nfs_share
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellyfin-nas
+  namespace: jellyfin
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: jellyfin-nas
+  resources:
+    requests: {storage: 15Ti}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellyfin
+  namespace: jellyfin
+  labels: {app: jellyfin}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}    # RWX file locks on sqlite DBs dislike rolling
+  selector:
+    matchLabels: {app: jellyfin}
+  template:
+    metadata:
+      labels: {app: jellyfin}
+    spec:
+      # Pin to the NAS-hosted worker that has Intel iGPU passthrough.
+      nodeSelector:
+        accelerator: intel-quicksync
+      containers:
+        - name: jellyfin
+          image: jellyfin/jellyfin:latest
+          ports:
+            - {name: http, containerPort: 8096}
+          env:
+            - {name: TZ, value: Asia/Bangkok}
+            - {name: JELLYFIN_PublishedServerUrl, value: "https://jellyfin.home.0dl.me"}
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            # privileged is required for the container to open /dev/dri/*
+            # (kubelet's default device cgroup denies DRM char devices otherwise).
+            privileged: true
+          resources:
+            requests: {cpu: 200m, memory: 512Mi}
+            limits:   {cpu: "4",  memory: 4Gi}
+          volumeMounts:
+            - {name: nas, mountPath: /config, subPath: config/jelly/config}
+            - {name: nas, mountPath: /cache,  subPath: config/jelly/cache}
+            - {name: nas, mountPath: /media/movies, subPath: home/movie}
+            - {name: nas, mountPath: /media/series, subPath: home/series}
+            # Intel Quick Sync via VAAPI. Enable in Jellyfin admin:
+            #   Dashboard → Playback → Hardware acceleration → VAAPI
+            #   Device: /dev/dri/renderD128
+            - {name: dri, mountPath: /dev/dri}
+          startupProbe:
+            httpGet: {path: /health, port: 8096}
+            periodSeconds: 5
+            failureThreshold: 60      # up to 5 minutes cold start
+          readinessProbe:
+            httpGet: {path: /health, port: 8096}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: 8096}
+            periodSeconds: 30
+      volumes:
+        - name: nas
+          persistentVolumeClaim:
+            claimName: jellyfin-nas
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        # legacy placeholder (kept for grep-parity with old manifest)
+        #   hostPath: {path: /dev/dri}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jellyfin
+  namespace: jellyfin
+  labels: {app: jellyfin}
+spec:
+  # Routed via backbone-gateway — https://jellyfin.home.0dl.me
+  type: ClusterIP
+  selector: {app: jellyfin}
+  ports:
+    - {name: http, port: 8096, targetPort: http}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: jellyfin
+  namespace: jellyfin
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+  hostnames:
+    - jellyfin.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: jellyfin
+          port: 8096

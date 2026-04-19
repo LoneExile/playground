@@ -1,0 +1,45 @@
+# NFS Subdir External Provisioner
+# Chart: https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner/
+# Install:
+#   helm repo add nfs-subdir-external-provisioner \
+#     https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner/
+#   helm install nfs-subdir-external-provisioner \
+#     nfs-subdir-external-provisioner/nfs-subdir-external-provisioner \
+#     -n nfs-system --create-namespace \
+#     -f nfs-subdir-external-provisioner.yaml
+#
+# Prereqs:
+#   - Talos nodes must have nfs-utils / nfsd / nfsrahead system extensions
+#   - NFS server /etc/exports must allow the cluster subnet (10.0.10.0/24)
+
+replicaCount: 1
+
+nfs:
+  server: 192.168.1.179
+  path: /zpool1/nfs_share
+  # NFSv4.1 — matches Linux kernel client default; v3 also works on this server
+  mountOptions:
+    - nfsvers=4.1
+    - nolock
+    - noatime
+
+storageClass:
+  create: true
+  name: nfs-client
+  # Do NOT mark as cluster default — keep explicit opt-in from PVCs
+  defaultClass: false
+  # Rename subdir to archived-* instead of deleting (safer; clean up manually)
+  archiveOnDelete: true
+  reclaimPolicy: Delete
+  # Default path layout: /${namespace}-${PVC name}-${PV name}
+  pathPattern: "${.PVC.namespace}/${.PVC.name}"
+  accessModes: ReadWriteMany
+  allowVolumeExpansion: true
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi

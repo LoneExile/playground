@@ -1,0 +1,39 @@
+# MetalLB configuration — L2 mode
+# Install:
+#   kubectl create ns metallb-system
+#   kubectl label ns metallb-system pod-security.kubernetes.io/enforce=privileged \
+#     pod-security.kubernetes.io/audit=privileged pod-security.kubernetes.io/warn=privileged
+#   helm install metallb metallb/metallb -n metallb-system -f metallb.yaml
+#
+# Then apply the IPAddressPool + L2Advertisement manifests below
+# (split this file at the first `---` or copy them into a separate file).
+
+# === Helm chart values ===
+
+# Required when nodes have ExcludeBalancers label (Talos controlplane has it by default)
+speaker:
+  ignoreExcludeLB: true
+
+---
+# === Post-install: IPAddressPool ===
+# Range must be in the same L2 segment as the cluster nodes (10.0.10.0/24).
+# Avoid: nodes (.201-.203), VIP (.204), DHCP reservation range, gateway (.1).
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: backbone-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 10.0.10.210-10.0.10.230
+
+---
+# === Post-install: L2Advertisement ===
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: backbone-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - backbone-pool

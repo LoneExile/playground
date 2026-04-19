@@ -1,0 +1,16 @@
+# Kubernetes metrics-server for `kubectl top` + HPA.
+#   helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+#   helm install metrics-server metrics-server/metrics-server -n kube-system \
+#     -f metrics-server.yaml
+
+# Talos kubelets use self-signed serving certs by default; skip CA verify.
+args:
+  - --kubelet-insecure-tls
+  - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+  - --metric-resolution=15s
+
+replicas: 1
+
+resources:
+  requests: {cpu: 50m, memory: 64Mi}
+  limits:   {cpu: 200m, memory: 256Mi}

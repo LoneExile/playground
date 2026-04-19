@@ -1,0 +1,230 @@
+# qBittorrent (download engine) + qui (modern WebUI from autobrr).
+# Downloads land on the NAS at /zpool1/nfs_share/home/download (visible in
+# filebrowser under home/download/).
+#
+# Apply:
+#   kubectl apply -f qbittorrent-qui.yaml
+#   kubectl -n torrents get svc   # LoadBalancer IP for qui
+#
+# First-time setup:
+#   1. qBittorrent WebUI is ClusterIP-only (internal). Port-forward to configure:
+#        kubectl -n torrents port-forward svc/qbittorrent 8080:8080
+#      Then open http://localhost:8080 → default login admin / adminadmin
+#      → Tools → Options → WebUI → change password immediately.
+#      → Tools → Options → Downloads → default save path = /downloads
+#   2. Open qui at http://<loadbalancer-ip>:7476 → create initial admin user
+#      → Add Instance → URL http://qbittorrent.torrents.svc.cluster.local:8080
+#      → username/password from step 1 above.
+#
+# BT incoming traffic: qBittorrent listens on 6881 but only ClusterIP here, so
+# peers can't connect in. DHT + outbound peers still work. For full incoming
+# connectivity, expose 6881 via LoadBalancer and port-forward on the UDM.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: torrents
+  labels:
+    # linuxserver/qbittorrent's s6-overlay init starts as root → needs baseline
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+---
+# Static PV at NFS share root — same pattern as jellyfin/filebrowser.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: qbittorrent-nas
+spec:
+  capacity: {storage: 15Ti}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions: [nfsvers=4.1, nolock, noatime]
+  nfs:
+    server: 192.168.1.179
+    path: /zpool1/nfs_share
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qbittorrent-nas
+  namespace: torrents
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: qbittorrent-nas
+  resources:
+    requests: {storage: 15Ti}
+---
+# qui's own state — small, dynamic from nfs-client.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qui-config
+  namespace: torrents
+spec:
+  storageClassName: nfs-client
+  accessModes: [ReadWriteMany]
+  resources:
+    requests: {storage: 1Gi}
+---
+# =============================================================================
+# qBittorrent
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qbittorrent
+  namespace: torrents
+  labels: {app: qbittorrent}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}    # sqlite-backed state, not safe for rolling
+  selector:
+    matchLabels: {app: qbittorrent}
+  template:
+    metadata:
+      labels: {app: qbittorrent}
+    spec:
+      containers:
+        - name: qbittorrent
+          image: lscr.io/linuxserver/qbittorrent:latest
+          ports:
+            - {name: http,   containerPort: 8080}
+            - {name: bt-tcp, containerPort: 6881, protocol: TCP}
+            - {name: bt-udp, containerPort: 6881, protocol: UDP}
+          env:
+            - {name: PUID, value: "0"}
+            - {name: PGID, value: "0"}
+            - {name: TZ,   value: "Asia/Bangkok"}
+            - {name: WEBUI_PORT, value: "8080"}
+            - {name: TORRENTING_PORT, value: "6881"}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits:   {cpu: "2",  memory: 2Gi}
+          volumeMounts:
+            - {name: nas, mountPath: /config,    subPath: config/qbittorrent}
+            - {name: nas, mountPath: /downloads, subPath: home/download}
+          readinessProbe:
+            httpGet: {path: /, port: 8080}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /, port: 8080}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: nas
+          persistentVolumeClaim:
+            claimName: qbittorrent-nas
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qbittorrent
+  namespace: torrents
+  labels: {app: qbittorrent}
+spec:
+  type: ClusterIP          # internal only — qui talks to this
+  selector: {app: qbittorrent}
+  ports:
+    - {name: http,   port: 8080, targetPort: http}
+    - {name: bt-tcp, port: 6881, targetPort: bt-tcp, protocol: TCP}
+    - {name: bt-udp, port: 6881, targetPort: bt-udp, protocol: UDP}
+---
+# =============================================================================
+# qui (WebUI for qBittorrent)
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qui
+  namespace: torrents
+  labels: {app: qui}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}    # sqlite DB on NFS — concurrent writers corrupt WAL
+  selector:
+    matchLabels: {app: qui}
+  template:
+    metadata:
+      labels: {app: qui}
+    spec:
+      containers:
+        - name: qui
+          image: ghcr.io/autobrr/qui:latest
+          ports:
+            - {name: http, containerPort: 7476}
+          env:
+            - {name: TZ, value: "Asia/Bangkok"}
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+            limits:   {cpu: 500m, memory: 256Mi}
+          volumeMounts:
+            - {name: config, mountPath: /config}
+          readinessProbe:
+            tcpSocket: {port: 7476}
+            initialDelaySeconds: 5
+          livenessProbe:
+            tcpSocket: {port: 7476}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: qui-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qui
+  namespace: torrents
+  labels: {app: qui}
+spec:
+  # Routed through backbone-gateway via HTTPRoute below — no LoadBalancer.
+  type: ClusterIP
+  selector: {app: qui}
+  ports:
+    - {name: http, port: 7476, targetPort: http}
+---
+# =============================================================================
+# HTTPRoutes through backbone-gateway (Cilium Gateway API)
+# =============================================================================
+# Hostnames:
+#   http://qui.home.0dl.me   → qui WebUI
+#   http://qbit.home.0dl.me  → qBittorrent WebUI (replaces port-forward workflow)
+#
+# Requires gateway.yaml applied first.
+
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: qui
+  namespace: torrents
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+  hostnames:
+    - qui.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: qui
+          port: 7476
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: qbittorrent
+  namespace: torrents
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+  hostnames:
+    - qbit.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: qbittorrent
+          port: 8080

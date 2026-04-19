@@ -1,0 +1,38 @@
+# Gateway API — CRDs are not Helm-installed; apply them with kubectl:
+#
+#   kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+#
+# After Cilium is installed (it ships the `cilium` GatewayClass controller),
+# apply the Gateway + namespace below. MetalLB will assign a LoadBalancer IP
+# to the auto-generated `cilium-gateway-backbone-gateway` Service.
+#
+#   kubectl apply -f gateway-api.yaml
+#
+# Verify:
+#   kubectl get gatewayclass cilium
+#   kubectl -n gateway-system get gateway backbone-gateway
+#   kubectl -n gateway-system get svc cilium-gateway-backbone-gateway
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateway-system
+
+---
+# Shared Gateway — listeners are added per-app (Harbor, Gitea, Backstage, etc.)
+# as TLS terminates at the Gateway and routes via HTTPRoute from app namespaces.
+# Start with HTTP-only on :80 here; add HTTPS listeners + cert-manager refs later.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: backbone-gateway
+  namespace: gateway-system
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: All

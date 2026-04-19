@@ -1,0 +1,54 @@
+# Shared HTTP gateway for all web UIs. Single MetalLB IP, host-based routing.
+#
+# Apply:
+#   kubectl apply -f gateway.yaml
+#
+# After this is up you'll see a LoadBalancer Service `cilium-gateway-backbone-gateway`
+# in gateway-system ns, pinned to 10.0.10.220. Point your client DNS at that IP
+# for any *.bb.lab hostname; each app has its own HTTPRoute.
+#
+# UDM Local DNS (recommended, works for all LAN clients):
+#   Settings → Networks → Home → DNS → Add entries mapping each hostname → 10.0.10.220
+#   Or use a wildcard/catch-all if your UDM firmware supports it.
+#
+# Quick local-only alternative (/etc/hosts):
+#   10.0.10.220  qui.bb.lab qbit.bb.lab jellyfin.bb.lab files.bb.lab
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateway-system
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: backbone-gateway
+  namespace: gateway-system
+  annotations:
+    # cert-manager watches this annotation and auto-issues/renews a Certificate
+    # for each HTTPS listener hostname, storing it in the Secret named in
+    # tls.certificateRefs. Start on -staging; flip to -prod after verification.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      # Accept HTTPRoutes from any namespace. Homelab-simple; tighten per-app
+      # with a namespaceSelector or ReferenceGrants if you want stricter control.
+      allowedRoutes:
+        namespaces:
+          from: All
+    # Wildcard HTTPS listener — cert-manager issues *.home.0dl.me via DNS-01.
+    - name: https-wildcard
+      port: 443
+      protocol: HTTPS
+      hostname: "*.home.0dl.me"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-home-0dl-me-tls
+      allowedRoutes:
+        namespaces:
+          from: All

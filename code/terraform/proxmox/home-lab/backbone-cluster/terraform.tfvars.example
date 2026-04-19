@@ -1,0 +1,39 @@
+# Shared tfvars for all stages (01-talos-cluster, 02-helm-stack).
+# Copy to terraform.tfvars and fill in real values. terraform.tfvars is gitignored.
+
+# =============================================================================
+# Stage 01: Proxmox hosts + VMs
+# =============================================================================
+
+# Primary Proxmox host (hosts controlplane VMs)
+proxmox_api_token_id     = "root@pam!terraform"
+proxmox_api_token_secret = "changeme"
+proxmox_password         = "changeme"
+
+# NAS Proxmox host (hosts bb-worker-01 + NFS)
+proxmox_api_token_secret_nas = "changeme"
+proxmox_password_nas         = "changeme"
+
+# VM credentials (cloud-init — not used by Talos but kept for shared schema)
+vm_password      = "changeme"
+vm_password_hash = "changeme"  # mkpasswd --method=sha-512
+
+# SSH key deployed to VMs
+ssh_public_key = "ssh-ed25519 AAAA..."
+
+# RustFS S3 backend (stage 00-builder)
+rustfs_root_user     = "rustfsadmin"
+rustfs_root_password = "changeme"
+
+# =============================================================================
+# Stage 02: In-cluster services + edge
+# =============================================================================
+
+# Cloudflare API token with Zone:DNS:Edit + Zone:Zone:Read on primary_domain.
+# Used by cert-manager for DNS-01 + Terraform to manage the wildcard A record.
+# Create at: https://dash.cloudflare.com/profile/api-tokens
+cloudflare_api_token = "cfut_xxx..."
+
+# UniFi API key for DHCP reservation management.
+# Create in UniFi Site Manager -> Control Plane -> Integrations.
+unifi_api_key = "xxx..."

@@ -1,0 +1,13 @@
+.harbor-robot.env
+ca.crt
+01-helm-stack/terraform.tfvars
+terraform.tfvars
+.omc
+
+# Terraform state & secrets
+**/.terraform/
+**/terraform.tfstate*
+**/.terraform.lock.hcl
+*.tfplan
+01-talos-cluster/kubeconfig
+01-talos-cluster/talosconfig

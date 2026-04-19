@@ -1,0 +1,32 @@
+# cert-manager Helm values.
+# Install:
+#   helm repo add jetstack https://charts.jetstack.io
+#   helm install cert-manager jetstack/cert-manager -n cert-manager \
+#     --create-namespace -f cert-manager.yaml
+#
+# enableGatewayAPI registers controllers for gateway.networking.k8s.io/v1
+# resources — required so Gateway/HTTPRoute cert-manager annotations work.
+# Gateway API CRDs must already be installed in the cluster (they are —
+# see 02-helm-stack/values/gateway-api.yaml).
+
+installCRDs: true
+
+config:
+  apiVersion: controller.config.cert-manager.io/v1alpha1
+  kind: ControllerConfiguration
+  enableGatewayAPI: true
+
+# Modest resource limits — cert-manager is quiet outside renewal windows.
+resources:
+  requests: {cpu: 10m, memory: 64Mi}
+  limits:   {cpu: 200m, memory: 256Mi}
+
+webhook:
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits:   {cpu: 100m, memory: 128Mi}
+
+cainjector:
+  resources:
+    requests: {cpu: 10m, memory: 64Mi}
+    limits:   {cpu: 200m, memory: 256Mi}

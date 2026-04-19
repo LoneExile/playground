@@ -1,0 +1,88 @@
+# ClusterIssuers for cert-manager — three paths, pick per-cert:
+#
+#   letsencrypt-staging  – for testing (high rate limits, untrusted roots).
+#                          Use this FIRST when setting up a new cert.
+#   letsencrypt-prod     – for real public domains (browsers trust natively).
+#                          DNS-01 via Cloudflare; works for any domain in your CF account.
+#   ca-issuer            – self-signed root. For internal-only hostnames like
+#                          *.bb.lab. Browsers warn unless you install the CA.
+#
+# Secret `cloudflare-api-token` must exist in cert-manager ns before LE issuers
+# can validate. Applied out-of-band (token comes from terraform.tfvars).
+#
+# Usage on an HTTPRoute-bound Gateway listener:
+#   annotations:
+#     cert-manager.io/cluster-issuer: letsencrypt-prod
+# cert-manager will auto-issue + renew a Certificate for each listener hostname.
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: admin@0dl.me
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@0dl.me
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+---
+# Self-signed chain for local-only hostnames.
+# 1) selfsigned-issuer produces the root CA certificate
+# 2) Certificate 'ca-certificate' creates a long-lived CA in cert-manager ns
+# 3) ca-issuer signs end-entity certs using that CA
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ca-certificate
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: backbone-cluster-ca
+  secretName: ca-secret
+  duration: 87600h   # 10 years
+  renewBefore: 720h  # 30 days
+  privateKey:
+    algorithm: RSA
+    size: 4096
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: ca-issuer
+spec:
+  ca:
+    secretName: ca-secret
