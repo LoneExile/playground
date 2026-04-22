@@ -192,6 +192,27 @@ resource "talos_machine_configuration_apply" "node" {
   node                        = each.value.ip
 
   config_patches = [
+    # Minimal bird2 ExtensionServiceConfig so the extension can start.
+    # The siderolabs/bird2 extension ships in the schematic but requires a
+    # config file or boot fails after ~1h10m and the node reboots in a loop.
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "ExtensionServiceConfig"
+      name       = "bird2"
+      configFiles = [{
+        content   = <<-BIRD
+          log syslog all;
+          router id 0.0.0.1;
+          protocol device {}
+          protocol direct { disabled; }
+          protocol kernel kernel4 {
+            ipv4 { export none; import none; };
+            disabled;
+          }
+        BIRD
+        mountPath = "/usr/local/etc/bird.conf"
+      }]
+    }),
     yamlencode({
       machine = {
         install = {
@@ -456,6 +477,26 @@ resource "talos_machine_configuration_apply" "worker" {
   node                        = each.value.ip
 
   config_patches = [
+    # See note above on controlplane node apply — bird2 needs a config file
+    # or Talos reboots the node after startAllServices times out (~1h10m).
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "ExtensionServiceConfig"
+      name       = "bird2"
+      configFiles = [{
+        content   = <<-BIRD
+          log syslog all;
+          router id 0.0.0.1;
+          protocol device {}
+          protocol direct { disabled; }
+          protocol kernel kernel4 {
+            ipv4 { export none; import none; };
+            disabled;
+          }
+        BIRD
+        mountPath = "/usr/local/etc/bird.conf"
+      }]
+    }),
     yamlencode({
       machine = {
         install = {
