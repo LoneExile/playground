@@ -1,12 +1,12 @@
-# App deployments. Each app's YAML lives in examples/<app>.yaml as the single
+# App deployments. Each app's YAML lives in manifests/<app>.yaml as the single
 # source of truth; this file loads them as multi-doc manifests and applies via
 # kubectl_manifest for_each. Edits go in the YAML files, not here.
 
 locals {
   app_files = {
-    filebrowser     = "${path.module}/examples/filebrowser.yaml"
-    jellyfin        = "${path.module}/examples/jellyfin.yaml"
-    qbittorrent_qui = "${path.module}/examples/qbittorrent-qui.yaml"
+    filebrowser     = "${path.module}/manifests/filebrowser.yaml"
+    jellyfin        = "${path.module}/manifests/jellyfin.yaml"
+    qbittorrent_qui = "${path.module}/manifests/qbittorrent-qui.yaml"
   }
 }
 
