@@ -228,3 +228,42 @@ spec:
     - backendRefs:
         - name: qbittorrent
           port: 8080
+---
+# =============================================================================
+# Tunnel routes — bare hostnames via Cloudflare Tunnel. HTTP-only (wildcard
+# cert covers *.home.0dl.me, not these), so bind explicitly to the :80
+# listener. CF terminates TLS at the edge.
+# =============================================================================
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: qui-tunnel
+  namespace: torrents
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+      sectionName: http
+  hostnames:
+    - qui.0dl.me
+  rules:
+    - backendRefs:
+        - name: qui
+          port: 7476
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: qbittorrent-tunnel
+  namespace: torrents
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+      sectionName: http
+  hostnames:
+    - qbit.0dl.me
+  rules:
+    - backendRefs:
+        - name: qbittorrent
+          port: 8080

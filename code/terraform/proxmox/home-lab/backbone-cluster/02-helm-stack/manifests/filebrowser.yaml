@@ -129,3 +129,23 @@ spec:
     - backendRefs:
         - name: filebrowser
           port: 80
+---
+# Tunnel route — bare files.0dl.me via Cloudflare Tunnel. HTTP-only (the
+# wildcard cert covers *.home.0dl.me, not the apex-level hostname), so bind
+# explicitly to the :80 listener. CF terminates TLS at the edge.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: filebrowser-tunnel
+  namespace: filebrowser
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+      sectionName: http
+  hostnames:
+    - files.0dl.me
+  rules:
+    - backendRefs:
+        - name: filebrowser
+          port: 80
