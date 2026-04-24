@@ -1,0 +1,136 @@
+# Memos — lightweight note-taking app. Reuses the old NFS subPath so the
+# existing sqlite DB (143MB) and uploads carry over from the previous cluster.
+#
+# Routed via backbone-gateway (Envoy Gateway). Cilium Gateway couldn't carry
+# Connect-RPC (gRPC-Web over HTTP/1.1) — Cilium's Envoy config hard-codes a
+# gRPC-Web filter that rejects it with 505. Envoy Gateway applies that filter
+# only to GRPCRoute, so HTTPRoute passes Connect-RPC through.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: memos
+  labels:
+    # runAsUser: 0 is required because /zpool1/nfs_share/config/memos is
+    # root-owned on the NAS; baseline PSA allows root without needing privileged.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: memos-nas
+spec:
+  capacity: {storage: 15Ti}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions: [nfsvers=4.1, nolock, noatime]
+  nfs:
+    server: 192.168.1.179
+    path: /zpool1/nfs_share
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memos-nas
+  namespace: memos
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: memos-nas
+  resources:
+    requests: {storage: 15Ti}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memos
+  namespace: memos
+  labels: {app: memos}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}    # sqlite on NFS — concurrent writers corrupt WAL
+  selector:
+    matchLabels: {app: memos}
+  template:
+    metadata:
+      labels: {app: memos}
+    spec:
+      containers:
+        - name: memos
+          image: ghcr.io/usememos/memos:latest
+          ports:
+            - {name: http, containerPort: 5230}
+          env:
+            - {name: TZ, value: Asia/Bangkok}
+            # Memos 0.24+ defaults to port 0 (random); pin to 5230 for the Service
+            - {name: MEMOS_PORT, value: "5230"}
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+            limits:   {cpu: 500m, memory: 512Mi}
+          volumeMounts:
+            - {name: nas, mountPath: /var/opt/memos, subPath: config/memos}
+          readinessProbe:
+            tcpSocket: {port: 5230}
+            initialDelaySeconds: 5
+          livenessProbe:
+            tcpSocket: {port: 5230}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: nas
+          persistentVolumeClaim:
+            claimName: memos-nas
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: memos
+  namespace: memos
+  labels: {app: memos}
+spec:
+  type: ClusterIP
+  selector: {app: memos}
+  ports:
+    - {name: http, port: 5230, targetPort: http}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: memos
+  namespace: memos
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+  hostnames:
+    - memos.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: memos
+          port: 5230
+---
+# Tunnel route — bare memos.0dl.me via Cloudflare Tunnel. HTTP-only (the
+# wildcard cert covers *.home.0dl.me, not this hostname), so bind explicitly
+# to the :80 listener. CF terminates TLS at the edge.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: memos-tunnel
+  namespace: memos
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+      sectionName: http
+  hostnames:
+    - memos.0dl.me
+  rules:
+    - backendRefs:
+        - name: memos
+          port: 5230

@@ -1,0 +1,14 @@
+# Envoy Gateway controller values. Defaults work; we keep the file as an
+# anchor point for tuning replicas, resources, or watch scope later.
+# The chart also installs a default GatewayClass `eg` bound to the controller
+# `gateway.envoyproxy.io/gatewayclass-controller`.
+
+deployment:
+  envoyGateway:
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi

@@ -148,3 +148,29 @@ resource "helm_release" "metrics_server" {
 
   values = [file("${path.module}/values/metrics-server.yaml")]
 }
+
+# =============================================================================
+# 5. Envoy Gateway (Gateway API controller)
+# =============================================================================
+# Replaces Cilium Gateway as the controller for `backbone-gateway`. Cilium
+# Gateway's Envoy config hard-codes a gRPC-Web HTTP filter that rejects
+# Connect-RPC (Memos) with 505 regardless of appProtocol. Envoy Gateway applies
+# the filter only to GRPCRoute, so HTTPRoute passes Connect-RPC through cleanly.
+# Cilium CNI + kube-proxy-replacement + LB-IPAM are untouched.
+
+resource "helm_release" "envoy_gateway" {
+  depends_on = [time_sleep.wait_for_cilium]
+
+  name             = "eg"
+  chart            = "oci://docker.io/envoyproxy/gateway-helm"
+  version          = var.envoy_gateway_version
+  namespace        = "envoy-gateway-system"
+  create_namespace = true
+  wait             = true
+  timeout          = 600
+}
+
+resource "time_sleep" "wait_for_envoy_gateway" {
+  depends_on      = [helm_release.envoy_gateway]
+  create_duration = "30s"
+}

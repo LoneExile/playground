@@ -1,5 +1,10 @@
-# Cluster edge: namespace, Gateway (HTTP+HTTPS wildcard), Cloudflare DNS,
-# EndpointSlice label workaround (Cilium <-> MetalLB).
+# Cluster edge: namespace, EnvoyProxy config (MetalLB IP pin), Gateway
+# (HTTP + HTTPS wildcard), Cloudflare DNS.
+#
+# Note: we use Envoy Gateway (gatewayClassName: eg) instead of Cilium Gateway
+# because Cilium's Envoy config hard-codes a gRPC-Web filter that rejects
+# Connect-RPC (Memos) with 505. Envoy Gateway applies the filter only to
+# GRPCRoute, letting HTTPRoute pass Connect-RPC through untouched.
 
 resource "kubernetes_namespace" "gateway_system" {
   depends_on = [time_sleep.wait_for_cilium]
@@ -7,6 +12,38 @@ resource "kubernetes_namespace" "gateway_system" {
   metadata {
     name = "gateway-system"
   }
+}
+
+# Per-gateway Envoy proxy config: sets the MetalLB annotation on the Service
+# that Envoy Gateway auto-provisions for the Gateway below, pinning it to the
+# static gateway IP so DNS + Cloudflare tunnel origins stay stable across
+# restarts. Referenced via Gateway.spec.infrastructure.parametersRef.
+resource "kubectl_manifest" "envoyproxy_backbone" {
+  depends_on = [
+    kubernetes_namespace.gateway_system,
+    time_sleep.wait_for_envoy_gateway,
+  ]
+
+  yaml_body = yamlencode({
+    apiVersion = "gateway.envoyproxy.io/v1alpha1"
+    kind       = "EnvoyProxy"
+    metadata = {
+      name      = "backbone-proxy"
+      namespace = "gateway-system"
+    }
+    spec = {
+      provider = {
+        type = "Kubernetes"
+        kubernetes = {
+          envoyService = {
+            annotations = {
+              "metallb.universe.tf/loadBalancerIPs" = var.gateway_external_ip
+            }
+          }
+        }
+      }
+    }
+  })
 }
 
 # Single Gateway carries all app hostnames under *.home.0dl.me.
@@ -19,6 +56,7 @@ resource "kubectl_manifest" "backbone_gateway" {
     kubectl_manifest.cluster_issuer_le_staging,
     kubectl_manifest.cluster_issuer_ca,
     kubectl_manifest.metallb_l2adv,
+    kubectl_manifest.envoyproxy_backbone,
   ]
 
   yaml_body = yamlencode({
@@ -32,7 +70,14 @@ resource "kubectl_manifest" "backbone_gateway" {
       }
     }
     spec = {
-      gatewayClassName = "cilium"
+      gatewayClassName = "eg"
+      infrastructure = {
+        parametersRef = {
+          group = "gateway.envoyproxy.io"
+          kind  = "EnvoyProxy"
+          name  = "backbone-proxy"
+        }
+      }
       listeners = [
         {
           name     = "http"
@@ -65,43 +110,6 @@ resource "kubectl_manifest" "backbone_gateway" {
 resource "time_sleep" "wait_for_gateway" {
   depends_on      = [kubectl_manifest.backbone_gateway]
   create_duration = "30s"
-}
-
-# -----------------------------------------------------------------------------
-# Known issue workaround: Cilium Gateway auto-creates an EndpointSlice for its
-# LoadBalancer Service without the standard `kubernetes.io/service-name` label
-# that MetalLB uses to determine readiness. Without this label MetalLB refuses
-# to announce the gateway IP (ARP stays incomplete). Patch the label in post.
-#
-# Re-runs whenever the Gateway is recreated.
-# -----------------------------------------------------------------------------
-resource "null_resource" "gateway_endpointslice_label" {
-  depends_on = [time_sleep.wait_for_gateway]
-
-  triggers = {
-    gateway_uid = kubectl_manifest.backbone_gateway.uid
-  }
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      #!/bin/bash
-      set -e
-      # Wait up to 60s for Cilium to create the EndpointSlice, then patch.
-      for i in $(seq 1 30); do
-        if kubectl --kubeconfig ${var.kubeconfig_path} -n gateway-system \
-             get endpointslice cilium-gateway-backbone-gateway >/dev/null 2>&1; then
-          kubectl --kubeconfig ${var.kubeconfig_path} -n gateway-system label \
-            endpointslice cilium-gateway-backbone-gateway \
-            kubernetes.io/service-name=cilium-gateway-backbone-gateway \
-            --overwrite
-          exit 0
-        fi
-        sleep 2
-      done
-      echo "EndpointSlice didn't appear in 60s; MetalLB may not announce gateway IP"
-      exit 1
-    EOT
-  }
 }
 
 # =============================================================================

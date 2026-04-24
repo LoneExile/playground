@@ -6,6 +6,7 @@ locals {
   app_files = {
     filebrowser     = "${path.module}/manifests/filebrowser.yaml"
     jellyfin        = "${path.module}/manifests/jellyfin.yaml"
+    memos           = "${path.module}/manifests/memos.yaml"
     qbittorrent_qui = "${path.module}/manifests/qbittorrent-qui.yaml"
   }
 }
@@ -29,7 +30,7 @@ resource "kubectl_manifest" "apps" {
   for_each = local.app_manifests
 
   depends_on = [
-    null_resource.gateway_endpointslice_label,
+    time_sleep.wait_for_gateway,
     helm_release.nfs_subdir_provisioner,
   ]
 

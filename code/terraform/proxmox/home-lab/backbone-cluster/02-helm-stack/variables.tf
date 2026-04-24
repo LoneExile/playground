@@ -36,6 +36,12 @@ variable "cert_manager_version" {
   default = "v1.19.4"
 }
 
+variable "envoy_gateway_version" {
+  description = "envoy-gateway-helm chart version (OCI registry tag)"
+  type        = string
+  default     = "1.5.0"
+}
+
 # --- Network ---
 variable "metallb_ip_range" {
   description = "MetalLB L2 IP pool (must be in cluster subnet)"
