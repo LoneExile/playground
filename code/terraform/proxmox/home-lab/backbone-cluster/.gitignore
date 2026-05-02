@@ -8,6 +8,8 @@ terraform.tfvars
 **/.terraform/
 **/terraform.tfstate*
 **/.terraform.lock.hcl
+**/backend.tfvars
 *.tfplan
 01-talos-cluster/kubeconfig
 01-talos-cluster/talosconfig
+note.txt
