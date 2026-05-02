@@ -23,6 +23,9 @@ locals {
       paperless_db_password = var.paperless_db_password
       paperless_secret_key  = var.paperless_secret_key
     })
+    immich = templatefile("${path.module}/manifests/immich.yaml", {
+      immich_db_password = var.immich_db_password
+    })
   }
 }
 

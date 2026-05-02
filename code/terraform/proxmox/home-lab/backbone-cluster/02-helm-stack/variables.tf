@@ -142,6 +142,16 @@ variable "paperless_secret_key" {
   sensitive   = true
 }
 
+# --- Immich ---
+# Used by manifests/immich.yaml (rendered via templatefile in apps.tf).
+# Postgres data dir is fresh; the 'immich' role is created on initdb from this
+# password. The Job/immich-restore then loads the latest pg_dump backup.
+variable "immich_db_password" {
+  description = "Password for the 'immich' Postgres role. Used by initdb on first boot and by immich-server. Rotate by editing terraform.tfvars and re-applying (immich-server reads it from the Secret on each pod start)."
+  type        = string
+  sensitive   = true
+}
+
 # --- Inherit harmless 01-stage vars so shared terraform.tfvars doesn't error ---
 # Not used in this stage; declared only so Terraform doesn't complain about
 # "undeclared variable" when loading ../terraform.tfvars.

@@ -43,3 +43,8 @@ unifi_api_key = "xxx..."
 # secret_key is Django's session/CSRF crypto; generate with `openssl rand -base64 64`.
 paperless_db_password = "changeme"
 paperless_secret_key  = "changeme-base64-string"
+
+# Immich db password — consumed by manifests/immich.yaml.
+# Used by initdb on first boot and by immich-server (read from a Secret each pod start).
+# Generate with `openssl rand -base64 32`.
+immich_db_password = "changeme"

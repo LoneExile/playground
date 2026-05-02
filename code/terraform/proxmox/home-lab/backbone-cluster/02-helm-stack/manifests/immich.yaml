@@ -1,0 +1,480 @@
+# Immich — self-hosted photo & video archive. Restores the photo library
+# (~5.5 GB across upload/, thumbs/, encoded-video/, library/, profile/) in
+# place from the previous cluster, and restores the database from the most
+# recent nightly pg_dumpall backup (Mar 11 2025) into a brand-new PG14 cluster
+# on a separate NFS path. Old PGDATA is left untouched as a safety copy until
+# the new instance is verified healthy.
+#
+# NFS layout reused (192.168.1.179:/zpool1/nfs_share):
+#   config/immich/app           → /data         on immich-server (1000:1000)
+#   config/immich/app           → /upload       on Job/immich-restore (read backups, write sentinel)
+#   config/immich-v2/db         → /var/lib/postgresql/data on postgres (999:999, fresh)
+#
+# Stack: immich-server + immich-machine-learning + postgres-14(+vchord+pgvecto.rs) + valkey
+# (4 deployments + 1 Job).
+# GUI:   https://immich.home.0dl.me   (LAN, wildcard cert)
+#        https://immich.0dl.me        (Cloudflare Tunnel — CF Access NOT yet wired; follow-up)
+#
+# This manifest is rendered via templatefile() in apps.tf. The real value for
+# $${immich_db_password} comes from a sensitive variable in
+# 02-helm-stack/variables.tf, populated from terraform.tfvars (gitignored).
+#
+# Image pins (from upstream v2.7.5 docker-compose.yml):
+#   ghcr.io/immich-app/immich-server:v2.7.5
+#   ghcr.io/immich-app/immich-machine-learning:v2.7.5
+#   ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf6...
+#   docker.io/valkey/valkey:9@sha256:3b55...
+#
+# DEPLOY STEPS:
+#   1. Add immich_db_password to ../terraform.tfvars
+#        (generate with: openssl rand -base64 32)
+#   2. terraform apply (from 02-helm-stack/).
+#   3. Watch pods + Job:
+#        kubectl -n immich get pods,jobs -w
+#        kubectl -n immich logs -f deploy/postgres
+#        kubectl -n immich logs -f job/immich-restore
+#        kubectl -n immich logs -f deploy/immich-server
+#   4. After Job/immich-restore reports Completed, hit the LAN URL:
+#        https://immich.home.0dl.me
+#      Login with the original account credentials.
+#   5. Trigger ML backfill: Administration → Jobs →
+#        - "Smart Search: Run All Missing"
+#        - "Face Detection: Run All Missing"
+#   6. FOLLOW-UPS (deferred):
+#      a. Wire Cloudflare Access for immich.0dl.me (currently unauthenticated).
+#      b. Once verified healthy, delete the now-unused dirs:
+#           config/immich/redis/, config/immich/redis-replica/  (~11 MB)
+#           config/immich/db/data/                                 (425 MB)
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: immich
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+---
+# Static PV — bind explicitly, no provisioner. Same one-PV-at-NAS-root pattern
+# as paperless and syncthing; deployments use subPath to scope to specific
+# subtrees on the NAS.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: immich-nas
+spec:
+  capacity: {storage: 15Ti}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions: [nfsvers=4.1, nolock, noatime]
+  nfs:
+    server: 192.168.1.179
+    path: /zpool1/nfs_share
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-nas
+  namespace: immich
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: immich-nas
+  resources:
+    requests: {storage: 15Ti}
+---
+# Secret — values rendered by templatefile() at terraform apply time.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: immich-secrets
+  namespace: immich
+type: Opaque
+stringData:
+  db-password: "${immich_db_password}"
+---
+# Postgres 14 — Immich's pinned image with both vchord (current vector ext)
+# and pgvecto.rs (legacy, for migration). Fresh PGDATA on a new NFS subPath.
+# initContainer chown's the dir because k8s auto-creates the subPath as
+# root-owned, but PG14 initdb refuses to run unless PGDATA is mode 700 owned
+# by the postgres UID.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: immich
+  labels: {app: postgres}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      initContainers:
+        - name: pgdata-prep
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              chown 999:999 /var/lib/postgresql/data
+              chmod 700 /var/lib/postgresql/data
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - {name: nas, mountPath: /var/lib/postgresql/data, subPath: config/immich-v2/db}
+      containers:
+        - name: postgres
+          image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+          ports:
+            - {name: postgres, containerPort: 5432}
+          env:
+            - {name: POSTGRES_USER, value: immich}
+            - {name: POSTGRES_DB,   value: immich}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: immich-secrets, key: db-password}
+            - {name: POSTGRES_INITDB_ARGS, value: "--data-checksums"}
+            - {name: PGDATA, value: /var/lib/postgresql/data}
+          volumeMounts:
+            - {name: nas, mountPath: /var/lib/postgresql/data, subPath: config/immich-v2/db}
+            - {name: dshm, mountPath: /dev/shm}
+          resources:
+            requests: {cpu: 200m, memory: 512Mi}
+            limits:   {cpu: "1",  memory: 2Gi}
+          readinessProbe:
+            exec: {command: [pg_isready, -U, immich, -d, immich]}
+            initialDelaySeconds: 5
+          livenessProbe:
+            exec: {command: [pg_isready, -U, immich, -d, immich]}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: nas
+          persistentVolumeClaim:
+            claimName: immich-nas
+        - name: dshm
+          # Upstream docker-compose sets shm_size: 128mb. Immich queries with
+          # large parallel workers can spill onto /dev/shm; the default 64Mi
+          # tmpfs in containerd is undersized.
+          emptyDir:
+            medium: Memory
+            sizeLimit: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: immich
+  labels: {app: postgres}
+spec:
+  type: ClusterIP
+  selector: {app: postgres}
+  ports:
+    - {name: postgres, port: 5432, targetPort: postgres}
+---
+# Restore Job — runs once on first deploy, gated by a sentinel file on NFS.
+# Filters role-level lines from the dump so the existing 'immich' user (just
+# created by initdb with the desired password) survives. Connects to the
+# maintenance 'postgres' DB so DROP DATABASE immich works before the dump
+# recreates it. ttl cleans up the Pod after 24h.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: immich-restore
+  namespace: immich
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app: immich-restore}
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-postgres
+          image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              for i in $(seq 1 120); do
+                pg_isready -h postgres -U immich -d immich && exit 0
+                sleep 2
+              done
+              echo "postgres never became ready" >&2
+              exit 1
+      containers:
+        - name: restore
+          image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: {name: immich-secrets, key: db-password}
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              if [ -f /upload/.immich-restored ]; then
+                echo "sentinel /upload/.immich-restored present — skipping restore"
+                exit 0
+              fi
+              DUMP=$(ls -t /upload/backups/immich-db-backup-*.sql.gz 2>/dev/null | head -1)
+              if [ -z "$DUMP" ]; then
+                echo "no backup found under /upload/backups/" >&2
+                exit 1
+              fi
+              echo "restoring from $DUMP"
+              gunzip -c "$DUMP" \
+                | sed -E '/^(DROP|CREATE|ALTER) ROLE/d' \
+                | psql -h postgres -U immich -d postgres -v ON_ERROR_STOP=0
+              touch /upload/.immich-restored
+              echo "restore complete; sentinel written"
+          volumeMounts:
+            - {name: nas, mountPath: /upload, subPath: config/immich/app}
+      volumes:
+        - name: nas
+          persistentVolumeClaim:
+            claimName: immich-nas
+---
+# Valkey — Redis-protocol queue/cache. Ephemeral by design (no persistence).
+# Upstream v2.7.5 switched from redis to valkey; the immich-server still
+# speaks the redis wire protocol via REDIS_HOSTNAME=valkey.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  namespace: immich
+  labels: {app: valkey}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: valkey}
+  template:
+    metadata:
+      labels: {app: valkey}
+    spec:
+      containers:
+        - name: valkey
+          image: docker.io/valkey/valkey:9@sha256:3b55fbaa0cd93cf0d9d961f405e4dfcc70efe325e2d84da207a0a8e6d8fde4f9
+          args: ["valkey-server", "--save", "", "--appendonly", "no"]
+          ports:
+            - {name: valkey, containerPort: 6379}
+          resources:
+            requests: {cpu: 50m,  memory: 64Mi}
+            limits:   {cpu: 200m, memory: 256Mi}
+          readinessProbe:
+            exec: {command: [valkey-cli, ping]}
+            initialDelaySeconds: 2
+          livenessProbe:
+            exec: {command: [valkey-cli, ping]}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: immich
+  labels: {app: valkey}
+spec:
+  type: ClusterIP
+  selector: {app: valkey}
+  ports:
+    - {name: valkey, port: 6379, targetPort: valkey}
+---
+# Immich server — single binary in v2.x (server + microservices unified).
+# Listens on 2283. The /data mount is the whole existing app/ tree; Immich
+# writes upload/, thumbs/, encoded-video/, library/, profile/, backups/ under it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-server
+  namespace: immich
+  labels: {app: immich-server}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: immich-server}
+  template:
+    metadata:
+      labels: {app: immich-server}
+    spec:
+      # Stop k8s from auto-injecting IMMICH_PORT=tcp://<svc-ip>:2283 from the
+      # sibling Service/immich. Without this, immich-server briefly works
+      # because we set IMMICH_PORT="2283" explicitly (explicit wins), but it's
+      # safer to disable the legacy Docker-link compat layer entirely.
+      enableServiceLinks: false
+      initContainers:
+        - name: wait-for-postgres
+          image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              for i in $(seq 1 120); do
+                pg_isready -h postgres -U immich -d immich && exit 0
+                sleep 2
+              done
+              exit 1
+      containers:
+        - name: immich-server
+          image: ghcr.io/immich-app/immich-server:v2.7.5
+          ports:
+            - {name: http, containerPort: 2283}
+          env:
+            - {name: TZ, value: "Asia/Bangkok"}
+            - {name: IMMICH_PORT, value: "2283"}
+            - {name: DB_HOSTNAME,        value: "postgres"}
+            - {name: DB_USERNAME,        value: "immich"}
+            - {name: DB_DATABASE_NAME,   value: "immich"}
+            - {name: DB_VECTOR_EXTENSION, value: "vectorchord"}
+            - name: DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: immich-secrets, key: db-password}}
+            - {name: REDIS_HOSTNAME, value: "valkey"}
+            - {name: IMMICH_MACHINE_LEARNING_URL, value: "http://immich-ml:3003"}
+            # Path inside the container where the media tree lives. Matches the
+            # upstream docker-compose $${UPLOAD_LOCATION}:/data binding contract.
+            - {name: UPLOAD_LOCATION, value: "/data"}
+            # Trust X-Forwarded-* from in-cluster proxies (Cilium pod CIDRs).
+            # Keeps client-IP / scheme correct behind backbone-gateway and the
+            # Cloudflare tunnel.
+            - {name: IMMICH_TRUSTED_PROXIES, value: "10.0.0.0/8,100.64.0.0/10"}
+          volumeMounts:
+            - {name: nas, mountPath: /data, subPath: config/immich/app}
+          resources:
+            requests: {cpu: 200m, memory: 1Gi}
+            limits:   {cpu: "2",  memory: 2Gi}
+          startupProbe:
+            httpGet: {path: /api/server/ping, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 60     # ~5 min cap on first-boot schema migration
+          readinessProbe:
+            httpGet: {path: /api/server/ping, port: http}
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /api/server/ping, port: http}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: nas
+          persistentVolumeClaim:
+            claimName: immich-nas
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich
+  namespace: immich
+  labels: {app: immich-server}
+spec:
+  type: ClusterIP
+  selector: {app: immich-server}
+  ports:
+    - {name: http, port: 2283, targetPort: http}
+---
+# Immich ML — CLIP smart search + face detection/recognition. Models are
+# downloaded on first inference call to /cache (emptyDir; re-downloadable).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-machine-learning
+  namespace: immich
+  labels: {app: immich-machine-learning}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: immich-machine-learning}
+  template:
+    metadata:
+      labels: {app: immich-machine-learning}
+    spec:
+      # Without this, k8s injects IMMICH_PORT=tcp://<immich-svc-ip>:2283 into
+      # this pod's env (because Service/immich exists in the same namespace).
+      # immich-machine-learning's pydantic settings then int-parses that and
+      # CrashLoops on `Input should be a valid integer`. enableServiceLinks:
+      # false suppresses the legacy Docker-link compat env vars cluster-wide
+      # for this pod.
+      enableServiceLinks: false
+      containers:
+        - name: ml
+          image: ghcr.io/immich-app/immich-machine-learning:v2.7.5
+          ports:
+            - {name: http, containerPort: 3003}
+          env:
+            - {name: TZ, value: "Asia/Bangkok"}
+          volumeMounts:
+            - {name: cache, mountPath: /cache}
+          resources:
+            requests: {cpu: 200m, memory: 2Gi}
+            limits:   {cpu: "2",  memory: 4Gi}
+          readinessProbe:
+            httpGet: {path: /ping, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /ping, port: http}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-ml
+  namespace: immich
+  labels: {app: immich-machine-learning}
+spec:
+  type: ClusterIP
+  selector: {app: immich-machine-learning}
+  ports:
+    - {name: http, port: 3003, targetPort: http}
+---
+# LAN route — wildcard TLS via cert-manager on the gateway.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: immich
+  namespace: immich
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+  hostnames:
+    - immich.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: immich
+          port: 2283
+---
+# Tunnel route — bare immich.0dl.me via Cloudflare Tunnel. HTTP-only at the
+# k8s edge; CF terminates TLS. CF Access is NOT yet wired; this route is
+# unauthenticated for now (deploy-step 6a follow-up).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: immich-tunnel
+  namespace: immich
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+      sectionName: http
+  hostnames:
+    - immich.0dl.me
+  rules:
+    - backendRefs:
+        - name: immich
+          port: 2283
