@@ -37,3 +37,9 @@ cloudflare_api_token = "cfut_xxx..."
 # UniFi API key for DHCP reservation management.
 # Create in UniFi Site Manager -> Control Plane -> Integrations.
 unifi_api_key = "xxx..."
+
+# Paperless-ngx secrets — consumed by manifests/paperless.yaml.
+# postgres password is re-asserted via ALTER USER on each postgres pod start.
+# secret_key is Django's session/CSRF crypto; generate with `openssl rand -base64 64`.
+paperless_db_password = "changeme"
+paperless_secret_key  = "changeme-base64-string"

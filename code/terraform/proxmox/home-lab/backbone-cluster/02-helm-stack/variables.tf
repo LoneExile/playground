@@ -122,6 +122,26 @@ variable "unifi_home_network_name" {
   default     = "Home"
 }
 
+# --- Paperless ---
+# Used by manifests/paperless.yaml (rendered via templatefile in apps.tf).
+# Postgres data dir is restored from NFS; the existing 'paperless' role's
+# password is unknown, so the postgres container's postStart hook re-asserts
+# this value via ALTER USER on every pod start using local-socket trust auth.
+variable "paperless_db_password" {
+  description = "Password for the 'paperless' Postgres role. Re-asserted on every postgres pod start via ALTER USER. Rotate by editing terraform.tfvars and rolling the postgres deployment."
+  type        = string
+  sensitive   = true
+}
+
+# Django secret key (PAPERLESS_SECRET_KEY). Used for session cookies and CSRF
+# tokens. Treat as opaque; rotating invalidates all active sessions but does
+# not affect stored documents or metadata.
+variable "paperless_secret_key" {
+  description = "PAPERLESS_SECRET_KEY (Django session/CSRF crypto). Generate with: openssl rand -base64 64"
+  type        = string
+  sensitive   = true
+}
+
 # --- Inherit harmless 01-stage vars so shared terraform.tfvars doesn't error ---
 # Not used in this stage; declared only so Terraform doesn't complain about
 # "undeclared variable" when loading ../terraform.tfvars.

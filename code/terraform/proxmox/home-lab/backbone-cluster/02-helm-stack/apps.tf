@@ -1,13 +1,28 @@
 # App deployments. Each app's YAML lives in manifests/<app>.yaml as the single
 # source of truth; this file loads them as multi-doc manifests and applies via
 # kubectl_manifest for_each. Edits go in the YAML files, not here.
+#
+# Most apps are static (file()). Apps that need secret values rendered into the
+# manifest are listed under app_rendered (templatefile()) and are merged with
+# the static set into a single kubectl_manifest for_each.
 
 locals {
+  # Static manifests — applied verbatim.
   app_files = {
+    blog            = "${path.module}/manifests/blog.yaml"
     filebrowser     = "${path.module}/manifests/filebrowser.yaml"
     jellyfin        = "${path.module}/manifests/jellyfin.yaml"
     memos           = "${path.module}/manifests/memos.yaml"
     qbittorrent_qui = "${path.module}/manifests/qbittorrent-qui.yaml"
+    syncthing       = "${path.module}/manifests/syncthing.yaml"
+  }
+
+  # Templated manifests — secrets / values from sensitive vars rendered in.
+  app_rendered = {
+    paperless = templatefile("${path.module}/manifests/paperless.yaml", {
+      paperless_db_password = var.paperless_db_password
+      paperless_secret_key  = var.paperless_secret_key
+    })
   }
 }
 
@@ -16,14 +31,25 @@ data "kubectl_file_documents" "apps" {
   content  = file(each.value)
 }
 
+data "kubectl_file_documents" "apps_rendered" {
+  for_each = local.app_rendered
+  content  = each.value
+}
+
 # Flatten { app => [doc1, doc2, ...] } into a stable map of {"app-N" => doc}
-# so kubectl_manifest can for_each over a single dimension.
+# so kubectl_manifest can for_each over a single dimension. Both static and
+# rendered maps are merged.
 locals {
-  app_manifests = merge([
-    for app, docs in data.kubectl_file_documents.apps : {
-      for idx, doc in docs.documents : "${app}-${idx}" => doc
-    }
-  ]...)
+  app_manifests = merge(
+    merge([
+      for app, docs in data.kubectl_file_documents.apps :
+      { for idx, doc in docs.documents : "${app}-${idx}" => doc }
+    ]...),
+    merge([
+      for app, docs in data.kubectl_file_documents.apps_rendered :
+      { for idx, doc in docs.documents : "${app}-${idx}" => doc }
+    ]...),
+  )
 }
 
 resource "kubectl_manifest" "apps" {
