@@ -1,0 +1,155 @@
+# Trilium (TriliumNext fork) — self-hosted notes app. Reuses the existing NFS
+# subPath so the previous SQLite vault carries over from the old cluster:
+# /zpool1/nfs_share/config/trilium/data/  (413 MB, owned 1000:1000 already)
+# That dir contains document.db (~117 MB), document.db-wal/-shm, config.ini,
+# session_secret.txt, sessions/, log/, and backup/ (daily/weekly/monthly DB
+# snapshots). Trilium opens the live DB on startup and replays the WAL — no
+# restore Job needed.
+#
+# Image is pinned via sha256 digest because :v0.102.2 is mutable and we want
+# reproducible rebuilds. Bump both the tag and the digest together when
+# upgrading; the digest is the security guarantee, the tag is for humans.
+#
+# Single replica + Recreate strategy: better-sqlite3 + NFS would corrupt the
+# WAL with two writers, same constraint as memos.
+#
+# Exposure: LAN via *.home.0dl.me wildcard cert + bare 0dl.me via Cloudflare
+# Tunnel (HTTP-only, TLS terminated at the CF edge). Same shape as memos.
+#
+# Post-apply manual follow-ups (Cloudflare side, can't be terraformed here):
+#   1. Cloudflare DNS: add CNAME `trilium.0dl.me` → `<tunnel-id>.cfargotunnel.com`
+#      (look up the tunnel ID jellyfin/memos already use).
+#   2. Cloudflare Tunnel "Published application routes" UI:
+#        Subdomain: trilium / Domain: 0dl.me / Path: empty (match all paths)
+#        Service: HTTP → 10.0.10.212  (gateway external IP)
+#      The empty Path is critical — see the immich incident where a leftover
+#      `^/blog` regex blocked everything but /blog requests.
+#   3. Update Trilium desktop / mobile sync clients to point at
+#      https://trilium.0dl.me  (off-LAN) or https://trilium.home.0dl.me (LAN).
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trilium
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: trilium-nas
+spec:
+  capacity: {storage: 15Ti}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions: [nfsvers=4.1, nolock, noatime]
+  nfs:
+    server: 192.168.1.179
+    path: /zpool1/nfs_share
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: trilium-nas
+  namespace: trilium
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: trilium-nas
+  resources:
+    requests: {storage: 15Ti}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trilium
+  namespace: trilium
+  labels: {app: trilium}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}    # sqlite on NFS — concurrent writers corrupt WAL
+  selector:
+    matchLabels: {app: trilium}
+  template:
+    metadata:
+      labels: {app: trilium}
+    spec:
+      containers:
+        - name: trilium
+          image: triliumnext/trilium:v0.102.2@sha256:f1a2fd88e7032d60f863231ce94348e906bcd6a5fa043801badd5896c20c064d
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - {name: TZ, value: Asia/Bangkok}
+            # Pin host explicitly: the existing config.ini has `host=` commented
+            # out, so we remove ambiguity by forcing 0.0.0.0 from env.
+            - {name: TRILIUM_HOST, value: 0.0.0.0}
+            - {name: TRILIUM_PORT, value: "8080"}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits:   {cpu: 1, memory: 1Gi}
+          volumeMounts:
+            - {name: nas, mountPath: /home/node/trilium-data, subPath: config/trilium/data}
+          readinessProbe:
+            httpGet: {path: /, port: 8080}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /, port: 8080}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: nas
+          persistentVolumeClaim:
+            claimName: trilium-nas
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trilium
+  namespace: trilium
+  labels: {app: trilium}
+spec:
+  type: ClusterIP
+  selector: {app: trilium}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+# LAN route — TLS terminated at the gateway via the *.home.0dl.me wildcard.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: trilium
+  namespace: trilium
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+  hostnames:
+    - trilium.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: trilium
+          port: 8080
+---
+# Tunnel route — bare trilium.0dl.me via Cloudflare Tunnel. HTTP-only at the
+# gateway (CF terminates TLS at the edge), so bind to the :http listener.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: trilium-tunnel
+  namespace: trilium
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+      sectionName: http
+  hostnames:
+    - trilium.0dl.me
+  rules:
+    - backendRefs:
+        - name: trilium
+          port: 8080

@@ -15,6 +15,7 @@ locals {
     memos           = "${path.module}/manifests/memos.yaml"
     qbittorrent_qui = "${path.module}/manifests/qbittorrent-qui.yaml"
     syncthing       = "${path.module}/manifests/syncthing.yaml"
+    trilium         = "${path.module}/manifests/trilium.yaml"
   }
 
   # Templated manifests — secrets / values from sensitive vars rendered in.
