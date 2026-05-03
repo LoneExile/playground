@@ -1,0 +1,166 @@
+# Syncthing — file sync. Reuses the old NFS subPaths so the existing device
+# identity (cert.pem → device ID), folder index, and synced data carry over
+# from the previous cluster:
+#   /config → config/syncthing/config   (cert.pem, key.pem, config.xml, index)
+#   /data1  → home/syncthing/data1      (SecondBrain, BackUpBrain, .logseq, wallpapers)
+#   /data2  → home/syncthing/data2
+#
+# GUI: routed via backbone-gateway → https://syncthing.home.0dl.me
+# Peer transport (22000 TCP/UDP): exposed via MetalLB LoadBalancer so other
+# devices can establish direct connections. Without it, Syncthing falls back
+# to relays — works, but slow.
+#
+# STGUIADDRESS env overrides whatever GUI bind is in the existing config.xml,
+# guaranteeing the WebUI listens on 0.0.0.0:8384 regardless of the old setting.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: syncthing
+  labels:
+    # linuxserver image's s6-overlay starts as root before dropping to PUID
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: syncthing-nas
+spec:
+  capacity: {storage: 15Ti}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions: [nfsvers=4.1, nolock, noatime]
+  nfs:
+    server: 192.168.1.179
+    path: /zpool1/nfs_share
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: syncthing-nas
+  namespace: syncthing
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: syncthing-nas
+  resources:
+    requests: {storage: 15Ti}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: syncthing
+  namespace: syncthing
+  labels: {app: syncthing}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}    # index db can't tolerate two writers on NFS
+  selector:
+    matchLabels: {app: syncthing}
+  template:
+    metadata:
+      labels: {app: syncthing}
+    spec:
+      containers:
+        - name: syncthing
+          image: lscr.io/linuxserver/syncthing:latest
+          ports:
+            - {name: http,        containerPort: 8384, protocol: TCP}
+            - {name: peer-tcp,    containerPort: 22000, protocol: TCP}
+            - {name: peer-udp,    containerPort: 22000, protocol: UDP}
+            - {name: discover,    containerPort: 21027, protocol: UDP}
+          env:
+            - {name: PUID, value: "0"}
+            - {name: PGID, value: "0"}
+            - {name: TZ,   value: "Asia/Bangkok"}
+            # Force GUI bind to all interfaces; supersedes <gui address> in
+            # the carried-over config.xml from the old setup.
+            - {name: STGUIADDRESS, value: "0.0.0.0:8384"}
+          resources:
+            requests: {cpu: 50m,  memory: 128Mi}
+            limits:   {cpu: "1",  memory: 1Gi}
+          volumeMounts:
+            - {name: nas, mountPath: /config, subPath: config/syncthing/config}
+            - {name: nas, mountPath: /data1,  subPath: home/syncthing/data1}
+            - {name: nas, mountPath: /data2,  subPath: home/syncthing/data2}
+          readinessProbe:
+            tcpSocket: {port: 8384}
+            initialDelaySeconds: 10
+          livenessProbe:
+            tcpSocket: {port: 8384}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: nas
+          persistentVolumeClaim:
+            claimName: syncthing-nas
+---
+# GUI service — routed through backbone-gateway via HTTPRoute below.
+apiVersion: v1
+kind: Service
+metadata:
+  name: syncthing
+  namespace: syncthing
+  labels: {app: syncthing}
+spec:
+  type: ClusterIP
+  selector: {app: syncthing}
+  ports:
+    - {name: http, port: 8384, targetPort: http}
+---
+# Peer transport — exposed on a MetalLB IP so remote devices can connect
+# directly instead of routing through public relays. Discovery (21027/UDP)
+# is local-LAN only and rides the same LB.
+apiVersion: v1
+kind: Service
+metadata:
+  name: syncthing-peer
+  namespace: syncthing
+  labels: {app: syncthing}
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector: {app: syncthing}
+  ports:
+    - {name: peer-tcp, port: 22000, targetPort: peer-tcp, protocol: TCP}
+    - {name: peer-udp, port: 22000, targetPort: peer-udp, protocol: UDP}
+    - {name: discover, port: 21027, targetPort: discover, protocol: UDP}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: syncthing
+  namespace: syncthing
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+  hostnames:
+    - syncthing.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: syncthing
+          port: 8384
+---
+# Tunnel route — bare syncthing.0dl.me via Cloudflare Tunnel. HTTP-only
+# (wildcard cert covers *.home.0dl.me, not this), so bind explicitly to
+# the :80 listener; CF terminates TLS at the edge.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: syncthing-tunnel
+  namespace: syncthing
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+      sectionName: http
+  hostnames:
+    - syncthing.0dl.me
+  rules:
+    - backendRefs:
+        - name: syncthing
+          port: 8384
