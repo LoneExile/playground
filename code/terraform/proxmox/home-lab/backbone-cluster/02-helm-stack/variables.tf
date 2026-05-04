@@ -152,6 +152,17 @@ variable "immich_db_password" {
   sensitive   = true
 }
 
+# --- SiYuan ---
+# Used by manifests/siyuan.yaml (rendered via templatefile in apps.tf).
+# Mandatory CLI flag --accessAuthCode since SiYuan v2.10.8 — kernel refuses to
+# start without it. Stored in a Secret and passed to the kernel as a CLI arg
+# via env var substitution at the deployment level.
+variable "siyuan_access_auth_code" {
+  description = "SiYuan --accessAuthCode value. Mandatory for Docker deploys since v2.10.8; the kernel refuses to start without it. Generate with: openssl rand -base64 32. Rotate by editing terraform.tfvars and re-applying (deployment rolls with the new value)."
+  type        = string
+  sensitive   = true
+}
+
 # --- Inherit harmless 01-stage vars so shared terraform.tfvars doesn't error ---
 # Not used in this stage; declared only so Terraform doesn't complain about
 # "undeclared variable" when loading ../terraform.tfvars.

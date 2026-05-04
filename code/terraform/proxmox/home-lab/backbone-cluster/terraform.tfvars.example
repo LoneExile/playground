@@ -48,3 +48,8 @@ paperless_secret_key  = "changeme-base64-string"
 # Used by initdb on first boot and by immich-server (read from a Secret each pod start).
 # Generate with `openssl rand -base64 32`.
 immich_db_password = "changeme"
+
+# SiYuan --accessAuthCode — consumed by manifests/siyuan.yaml.
+# Mandatory since SiYuan v2.10.8; the kernel refuses to start without it.
+# Generate with `openssl rand -base64 32`.
+siyuan_access_auth_code = "changeme"

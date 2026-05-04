@@ -27,6 +27,9 @@ locals {
     immich = templatefile("${path.module}/manifests/immich.yaml", {
       immich_db_password = var.immich_db_password
     })
+    siyuan = templatefile("${path.module}/manifests/siyuan.yaml", {
+      siyuan_access_auth_code = var.siyuan_access_auth_code
+    })
   }
 }
 
