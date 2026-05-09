@@ -66,7 +66,7 @@ spec:
     spec:
       containers:
         - name: syncthing
-          image: lscr.io/linuxserver/syncthing:latest
+          image: lscr.io/linuxserver/syncthing:v2.0.16-ls216
           ports:
             - {name: http,        containerPort: 8384, protocol: TCP}
             - {name: peer-tcp,    containerPort: 22000, protocol: TCP}
