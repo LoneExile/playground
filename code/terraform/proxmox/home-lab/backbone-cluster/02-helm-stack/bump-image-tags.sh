@@ -31,6 +31,7 @@ IMAGES=(
   "ghcr.io/autobrr/qui|autobrr/qui||"
   "ghcr.io/usememos/memos|usememos/memos|v|"
   "jellyfin/jellyfin|jellyfin/jellyfin|v|"
+  "lissy93/dashy|Lissy93/dashy||"
   "lscr.io/linuxserver/qbittorrent|linuxserver/docker-qbittorrent||"
   "lscr.io/linuxserver/syncthing|linuxserver/docker-syncthing||"
 )

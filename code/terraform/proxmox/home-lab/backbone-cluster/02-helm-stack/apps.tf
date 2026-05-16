@@ -10,6 +10,7 @@ locals {
   # Static manifests — applied verbatim.
   app_files = {
     blog            = "${path.module}/manifests/blog.yaml"
+    dashy           = "${path.module}/manifests/dashy.yaml"
     filebrowser     = "${path.module}/manifests/filebrowser.yaml"
     jellyfin        = "${path.module}/manifests/jellyfin.yaml"
     memos           = "${path.module}/manifests/memos.yaml"
