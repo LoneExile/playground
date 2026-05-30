@@ -39,8 +39,13 @@ both paths from here on:
     ├── llama-swap            :11434 (proxy)
     │   └── spawns llama-server on ${PORT} per requested model
     │       └── llama.cpp Vulkan b9415 → Mesa RADV → 780M iGPU
-    └── open-webui (Docker)  :8080
-        └── OPENAI_API_BASE_URL=http://127.0.0.1:11434/v1
+    ├── open-webui (Docker)  :8080
+    │   ├── OPENAI_API_BASE_URL=http://127.0.0.1:11434/v1
+    │   ├── SEARXNG_QUERY_URL=http://127.0.0.1:8888/search?q=<query>&format=json
+    │   ├── PLAYWRIGHT_WS_URL=http://127.0.0.1:9222  ← CDP, see CloakBrowser patch below
+    │   └── patched utils.py mounted over /app/backend/open_webui/retrieval/web/utils.py
+    ├── searxng      (Docker) :8888  ← meta-search backend, fans out to 8 engines
+    └── cloakbrowser (Docker) :9222  ← stealth Chromium (CDP) for JS-heavy + bot-walled pages
 ```
 
 GPU pool: UMA 16 GB (BIOS-reserved VRAM) + ~39 GB GTT (dynamic system-RAM
@@ -241,7 +246,7 @@ choice on a slow iGPU — total quality of 30B+, inference cost of ~3B.
 
 | Model | Quant | Size | Best for | Notes |
 |---|---|---|---|---|
-| Qwen3-30B-A3B-Instruct-2507 | Q6_K | 24 GB | general / reasoning | 3B active / 30B total, 32K ctx |
+| Qwen3-30B-A3B-Instruct-2507 | Q6_K | 24 GB | general / reasoning | 3B active / 30B total, 64K ctx (bumped from 32K for web-search headroom; ~32 GB total VRAM+GTT) |
 | Qwen3-Coder-30B-A3B-Instruct | Q6_K | 24 GB | coding | same arch as above, coder fine-tune |
 | LFM2-24B-A2B | Q8_0 | 24 GB | fast general | 2B active, fastest TG (~29 tok/s) |
 | DeepSeek-Coder-V2-Lite-Instruct | Q8_0 | 16 GB | lightweight code | 2.4B active, fast pp |
@@ -298,11 +303,11 @@ macros:
 models:
   "qwen3-30b":
     name: "Qwen3 30B-A3B Instruct"
-    description: "General-purpose MoE · 3B active · 32K ctx · ~27 tok/s"
+    description: "General-purpose MoE · 3B active · 64K ctx · ~27 tok/s"
     cmd: |
       ${llama-bin}
       --model ${models}/qwen3-30b-a3b-q6.gguf
-      -c 32768
+      -c 65536               # bumped from 32K — web search w/ 5-7 sources overflows 32K
       ${shared}
     env: ["${vulkan-env}"]
     aliases: ["qwen3", "default"]
@@ -387,13 +392,317 @@ pct exec 102 -- bash -c '
     -e ENABLE_OLLAMA_API=false \
     -e WEBUI_PORT=8080 \
     -e DEFAULT_USER_ROLE=admin \
+    -e ENABLE_RAG_WEB_SEARCH=true \
+    -e RAG_WEB_SEARCH_ENGINE=searxng \
+    -e SEARXNG_QUERY_URL="http://127.0.0.1:8888/search?q=<query>&format=json" \
+    -e RAG_WEB_SEARCH_RESULT_COUNT=5 \
+    -e RAG_WEB_SEARCH_CONCURRENT_REQUESTS=10 \
+    -e ENABLE_RAG_WEB_SEARCH_BYPASS_EMBEDDING_AND_RETRIEVAL=true \
+    -e ENABLE_SEARCH_QUERY_GENERATION=true \
+    -e TASK_MODEL=qwen3-30b \
+    -e RAG_WEB_LOADER_ENGINE=playwright \
+    -e PLAYWRIGHT_WS_URL=http://127.0.0.1:9222 \
+    -e PLAYWRIGHT_TIMEOUT=60000 \
+    -v /opt/open-webui/patches/utils.py:/app/backend/open_webui/retrieval/web/utils.py:ro \
     ghcr.io/open-webui/open-webui:main
 '
 ```
 
+`PLAYWRIGHT_WS_URL` is **http://** (not ws://) because CloakBrowser uses CDP,
+not the Playwright WS protocol. The patched `utils.py` auto-detects by
+scheme — see step 8c.
+
 `--network host` is the simplest path — Open WebUI talks to `llama-swap` on
-`127.0.0.1:11434` inside the LXC's netns and exposes its own UI on `:8080`.
-First signup becomes admin because `DEFAULT_USER_ROLE=admin` is set.
+`127.0.0.1:11434` and to `searxng` on `127.0.0.1:8888`, all inside the LXC's
+netns, and exposes its own UI on `:8080`. First signup becomes admin because
+`DEFAULT_USER_ROLE=admin` is set.
+
+Web-search env vars:
+
+| Var | Purpose |
+|---|---|
+| `ENABLE_RAG_WEB_SEARCH=true` | Master toggle for web search RAG. |
+| `RAG_WEB_SEARCH_ENGINE=searxng` | Pick the backend. Self-hosted SearXNG = no API key, no rate limit, full control. |
+| `SEARXNG_QUERY_URL` | Endpoint template. The literal `<query>` is substituted server-side. `format=json` is mandatory — Open WebUI doesn't scrape HTML. |
+| `RAG_WEB_SEARCH_RESULT_COUNT=5` | Top-N search results scraped per query. Each scrape is then chunked + (optionally) embedded. |
+| `RAG_WEB_SEARCH_CONCURRENT_REQUESTS=10` | Parallel fetches when scraping result pages. |
+| `ENABLE_RAG_WEB_SEARCH_BYPASS_EMBEDDING_AND_RETRIEVAL=true` | Skip the local embedding step — feed scraped chunks directly as context. Faster on a Vulkan-only box where embedding runs CPU-only. Tradeoff: longer prompts. |
+| `ENABLE_SEARCH_QUERY_GENERATION=true` | Let the model rewrite the user's message into a tighter search query before hitting SearXNG. Higher result quality. |
+| `TASK_MODEL=qwen3-30b` | Pin the query-rewriting / title-gen / tag-gen calls to a specific model. Without this, Open WebUI uses the current chat model — fine if you only chat with one model, but causes `llama-swap` to thrash if you switch models per chat (every web search would force an unload/reload). Pinning to `qwen3-30b` (the default chat model) means web search reuses the already-loaded weights — zero swap penalty. Change to `fast` if you usually chat with LFM2 instead. |
+| `RAG_WEB_LOADER_ENGINE=playwright` | Use headless Chromium to fetch SearXNG result URLs instead of `requests+BeautifulSoup`. Required for JS-heavy SPAs like Yahoo Finance, Bloomberg, anything React/Vue/Angular. Without this, the default loader gets back an empty `<div id="root"></div>` shell and the model sees nothing useful — leads to "Retrieved N sources" but model saying "sources are generic search queries". |
+| `PLAYWRIGHT_WS_URL=http://127.0.0.1:9222` | Remote browser endpoint. **CDP URL, not Playwright WS** — points at the CloakBrowser sidecar (see step 8c). The patched `utils.py` auto-detects scheme: `http(s)://` → `connect_over_cdp` (CloakBrowser, raw Chrome), `ws(s)://` → `connect` (browserless/Playwright server). |
+| `PLAYWRIGHT_TIMEOUT=60000` | Per-page nav timeout in **ms** (not seconds — older versions used seconds). 60s is generous; news sites are slow on first hit and Cloudflare challenges can add 5–10s. |
+
+### 8b. Install SearXNG (web search backend)
+
+SearXNG (https://github.com/searxng/searxng) is a self-hosted meta-search
+proxy. We run it next to Open WebUI on the same LXC, also `--network host`,
+listening on `:8888`. No API key, no rate limit, fully private.
+
+Config lives at `/opt/searxng/`:
+
+```bash
+pct exec 102 -- mkdir -p /opt/searxng
+```
+
+`/opt/searxng/settings.yml` — minimum required, **JSON format must be on**:
+
+```yaml
+# JSON format MUST be enabled — Open WebUI reads JSON, not HTML.
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "searxng-llm"
+
+server:
+  bind_address: "0.0.0.0"
+  port: 8888
+  secret_key: "REPLACE_WITH_openssl_rand_hex_32"
+  base_url: "http://127.0.0.1:8888/"
+  limiter: false
+  image_proxy: false
+  method: "GET"
+
+ui:
+  static_use_hash: true
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  formats:
+    - html
+    - json
+```
+
+Generate the secret:
+
+```bash
+SECRET=$(openssl rand -hex 32)
+sed -i "s|REPLACE_WITH_openssl_rand_hex_32|${SECRET}|" /opt/searxng/settings.yml
+```
+
+Optional limiter override (`/opt/searxng/limiter.toml`) — keep limiter off
+for LAN-only use:
+
+```toml
+[botdetection.ip_limit]
+link_token = false
+```
+
+Add an explicit `engines:` block in `settings.yml` so a single rate-limit
+(Brave) or CAPTCHA (DDG) doesn't starve the result set — fan out to many:
+
+```yaml
+engines:
+  - name: google
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: qwant
+    disabled: false
+  - name: startpage
+    disabled: false
+  - name: wikipedia
+    disabled: false
+  - name: mojeek
+    disabled: false
+  - name: yep
+    disabled: false
+  - name: presearch
+    disabled: false
+
+# Default 3s + 0 retries is brittle for slow engines:
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 10.0
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true
+```
+
+(All ten are technically default-enabled in SearXNG, but explicit entries
+make it obvious which fanout the instance is configured for and easy to flip
+individual ones off.)
+
+Run the container:
+
+```bash
+pct exec 102 -- bash -c '
+  docker run -d --name searxng --restart always \
+    --network host \
+    -v /opt/searxng:/etc/searxng:rw \
+    -e BASE_URL=http://127.0.0.1:8888/ \
+    -e INSTANCE_NAME=searxng-llm \
+    -e GRANIAN_PORT=8888 \
+    -e GRANIAN_HOST=0.0.0.0 \
+    docker.io/searxng/searxng:latest
+'
+```
+
+**Critical**: `GRANIAN_PORT=8888` is mandatory. The image's default port is
+`8080` — without the override, with `--network host`, SearXNG collides with
+Open WebUI on `:8080` and crash-loops with `RuntimeError: Address already
+in use (os error 98)`.
+
+Verify:
+
+```bash
+pct exec 102 -- curl -s -o /dev/null -w "HTTP %{http_code}\n" \
+  "http://127.0.0.1:8888/search?q=test&format=json"
+#   HTTP 200
+```
+
+In Open WebUI, click the `+` icon in the chat input → toggle **Web Search**.
+Model gets the top-N SearXNG results scraped and injected as context.
+
+⚠️ **The toggle is per-message.** Setting "Default Features → Web Search" on
+the model only flips it ON for **new** chats — it does not retroactively
+enable web search on pre-existing chats. If you ask the model a current-events
+question and it replies with "I can't search the web" / a stale knowledge
+cutoff, the per-message toggle was almost certainly OFF. Tail
+`docker logs -f open-webui | grep -iE "searxng|web_search"` while sending a
+test message — outbound SearXNG hit should appear within ~1s, otherwise the
+backend never entered the web-search branch.
+
+### 8c. Install CloakBrowser (stealth Chromium for JS-heavy + bot-walled pages)
+
+Without a real browser, Open WebUI's default loader (`requests` +
+`BeautifulSoup`) sees an empty React shell when fetching pages like Yahoo
+Finance, Bloomberg, Google Finance. UI shows "Retrieved N sources" but the
+model says the sources contain no usable info. A real headless Chromium fixes
+that — and **CloakBrowser** (https://github.com/CloakHQ/CloakBrowser) goes
+further: 58 C++-level fingerprint patches make Cloudflare Turnstile,
+FingerprintJS, BrowserScan all score it as a normal browser. No more "blocked
+by Cloudflare" / empty body responses.
+
+History: we first ran `browserless/chromium` which worked for most sites but
+kept hitting Cloudflare/Turnstile on news/finance pages and timed out at 30s.
+CloakBrowser replaces it.
+
+```bash
+pct exec 102 -- bash -c '
+  docker rm -f browserless cloakbrowser 2>/dev/null
+  docker run -d --name cloakbrowser --restart always \
+    --network host \
+    cloakhq/cloakbrowser cloakserve
+'
+```
+
+Verify CDP responds:
+
+```bash
+pct exec 102 -- curl -s http://127.0.0.1:9222/json/version | python3 -m json.tool
+# Expected: Browser=Chrome/146.x, real-looking UA, webSocketDebuggerUrl present
+```
+
+#### Patching Open WebUI for CDP (CloakBrowser doesn't speak Playwright WS)
+
+Open WebUI's loader calls `p.chromium.connect(playwright_ws_url)` which
+speaks the **Playwright WS protocol** (what `browserless` exposes at
+`ws://host:3000/chromium/playwright`). CloakBrowser only exposes **CDP** at
+`http://host:9222`. Different protocols, no handshake.
+
+Fix: bind-mount a two-line-patched `utils.py` into the container that
+(a) auto-detects scheme and dispatches `connect_over_cdp` for `http(s)://`
+URLs, `connect` for `ws(s)://` URLs, AND (b) calls `page.goto` with
+`wait_until="domcontentloaded"` instead of Playwright's default `"load"`.
+Both patches apply to BOTH branches of the loader (sync `lazy_load` and
+async `alazy_load`).
+
+The `wait_until` change is critical. Default `"load"` waits for every
+sub-resource (ads, trackers, web fonts, analytics beacons). News sites like
+CNN, Bloomberg, Reuters, even Yahoo Finance fire trackers indefinitely and
+never reach `"load"`, so a 60s timeout fires on EVERY page and the whole
+batch fails. `domcontentloaded` fires when the HTML parser finishes — text
+content is already in the DOM. Measured: CNN markets/NVDA dropped from 60s
+timeout to **1.2s success**.
+
+Download + patch + push:
+
+```bash
+# On a workstation:
+gh api -H "Accept: application/vnd.github.v3.raw" \
+  /repos/open-webui/open-webui/contents/backend/open_webui/retrieval/web/utils.py \
+  > /tmp/utils.py
+# Apply two patches to BOTH `lazy_load` AND `alazy_load`:
+#
+# (1) Scheme-aware connect:
+#   if self.playwright_ws_url:
+#       if self.playwright_ws_url.startswith(('http://', 'https://')):
+#           browser = p.chromium.connect_over_cdp(self.playwright_ws_url)
+#       else:
+#           browser = p.chromium.connect(self.playwright_ws_url)
+#
+# (2) wait_until=domcontentloaded (so news/ad-heavy sites don't time out):
+#   sed -i "s|page.goto(url, timeout=self.playwright_timeout)|page.goto(url, timeout=self.playwright_timeout, wait_until='domcontentloaded')|g" /tmp/utils.py
+
+scp /tmp/utils.py root@<pve>:/tmp/
+ssh root@<pve> 'pct exec 102 -- mkdir -p /opt/open-webui/patches && pct push 102 /tmp/utils.py /opt/open-webui/patches/utils.py'
+```
+
+Then mount in the `docker run` (see step 8):
+
+```
+-v /opt/open-webui/patches/utils.py:/app/backend/open_webui/retrieval/web/utils.py:ro
+```
+
+And flip `PLAYWRIGHT_WS_URL` from `ws://...:3000/chromium/playwright` to
+`http://127.0.0.1:9222`.
+
+Verify end-to-end — fetches finance.yahoo.com through CDP and confirms
+`navigator.webdriver` is false (proving CloakBrowser's stealth applies):
+
+```bash
+pct exec 102 -- docker exec open-webui python3 -c '
+import asyncio
+from playwright.async_api import async_playwright
+async def run():
+  async with async_playwright() as p:
+    browser = await p.chromium.connect_over_cdp("http://127.0.0.1:9222")
+    ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
+    page = await ctx.new_page()
+    await page.goto("https://finance.yahoo.com/quote/NVDA/",
+                    wait_until="domcontentloaded", timeout=45000)
+    print("title:", await page.title())
+    print("webdriver:", await page.evaluate("navigator.webdriver"))
+    print("UA:", (await page.evaluate("navigator.userAgent"))[:80])
+    await browser.close()
+asyncio.run(run())
+'
+# Expected:
+#   title: NVIDIA Corporation (NVDA) Stock Price, News, Quote & History - ...
+#   webdriver: False                  ← stealth working
+#   UA: Mozilla/5.0 (Windows NT 10.0; Win64; x64) ... Chrome/146 Safari/...
+```
+
+⚠️ **On every OWUI image upgrade, re-pull `utils.py` and re-apply the
+patch.** The bind-mount overlays whatever the new image ships; if the
+upstream file structure changes (different function name, signature, etc.),
+the mount will silently break web search. Watch for "Retrieved N sources"
+turning into "No sources found" after `docker pull` + restart — that's the
+signal to re-patch.
+
+⚠️ **Open WebUI persists admin settings in `webui.db` and DB overrides env
+vars on subsequent restarts.** Env vars only apply on first run or when the
+DB has no value for that field. Implications:
+
+- If you previously opened Admin → Settings → Web Search and clicked Save,
+  the DB has values that ignore `RAG_WEB_LOADER_ENGINE` etc. forever after.
+- To make Playwright stick, ALSO go to Admin → Settings → Web Search → Loader
+  section → **Web Loader Engine = playwright**, **Playwright WebSocket URL =
+  http://127.0.0.1:9222** (the CDP endpoint — not a ws://), **Playwright
+  Timeout (ms) = 60000**, and Save.
+- Or: stop the container, `sqlite3 /opt/open-webui/data/webui.db "DELETE FROM config WHERE ..."` to null out the field and let env take over again
+  (riskier — clears OTHER settings if the schema is one-row JSON-blob).
+
+Symptom of this gotcha: `docker inspect open-webui | grep RAG_WEB_*` shows
+your env values, but the admin UI panel shows different values. UI wins.
 
 ### 9. K8s gateway routing
 
@@ -520,6 +829,22 @@ docker pull ghcr.io/open-webui/open-webui:main
 docker rm -f open-webui
 # (then re-run the `docker run` from step 8)
 
+# Restart SearXNG
+docker pull docker.io/searxng/searxng:latest
+docker rm -f searxng
+# (then re-run the `docker run` from step 8b)
+
+# Restart CloakBrowser
+docker pull cloakhq/cloakbrowser:latest
+docker rm -f cloakbrowser
+# (then re-run the `docker run` from step 8c)
+
+# Test Playwright path end-to-end (see step 8c verify block)
+
+# Sanity-check web search wiring from the host
+pct exec 102 -- curl -s "http://127.0.0.1:8888/search?q=anthropic&format=json" \
+  | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d["results"]),"results")'
+
 # Add a new model
 # 1. drop the .gguf into /opt/llama-cpp/models/
 # 2. add a block to /opt/llama-swap/config.yaml (mirror an existing one)
@@ -566,6 +891,85 @@ If the address ever changes anyway, update the
    /opt/llama-cpp/llama-b9415/llama-cli --list-devices` should list
   `Vulkan0: AMD Radeon 780M`.
 
+### SearXNG container crash-loops with `Address already in use (os error 98)`
+
+- SearXNG image default port is `8080` via `granian`. With `--network host`,
+  this collides with Open WebUI (also `:8080`).
+- Fix: `-e GRANIAN_PORT=8888` on the `docker run`. Don't rely on
+  `server.port` in `settings.yml` alone — granian reads the env first.
+
+### Open WebUI "Web Search" toggle is missing or greyed out
+
+- Verify env: `docker inspect open-webui --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -iE "RAG|SEARX"`.
+  Must show `ENABLE_RAG_WEB_SEARCH=true` and a valid `SEARXNG_QUERY_URL`.
+- The toggle lives in the chat input `+` menu, **not** the model picker.
+  Admin → Settings → Web Search controls the backend; per-chat toggle is
+  what actually arms it for a given message.
+- Network reach test: `docker exec open-webui curl -s -o /dev/null -w "%{http_code}\n" \
+  "http://127.0.0.1:8888/search?q=ping&format=json"` must return `200`.
+  Anything else means SearXNG isn't on `127.0.0.1:8888` from Open WebUI's
+  netns (check both containers are `--network host`).
+
+### Web search hangs ~60s then errors — `Page.goto: Timeout 60000ms exceeded`
+
+- One slow URL in the result set (usually CNN markets, Bloomberg, Reuters)
+  blocks `loader.aload()` for the whole batch. Cause: default Playwright
+  `wait_until="load"` waits for every sub-resource; ad/tracker JS on news
+  sites never finishes loading.
+- Fix: ensure the `domcontentloaded` patch is applied (step 8c). Verify:
+  `docker exec open-webui grep -c domcontentloaded /app/backend/open_webui/retrieval/web/utils.py` — must be 2.
+- Workaround if patch missing: add the noisy domain to
+  Admin → Web Search → Domain Filter List with `!cnn.com,!bloomberg.com,!reuters.com` to skip them entirely.
+
+### Web search returns "request (N tokens) exceeds the available context size"
+
+- Playwright fetches full HTML for 5–7 result pages and Open WebUI injects
+  the lot. Easily breaches a 32K window. Three knobs to balance:
+  - **Admin → Web Search → Fetch URL Content Length Limit** = `4000` (chars
+    per page). Truncates extracted text. Cheapest fix.
+  - **Admin → Web Search → Search Result Count** = `3` (fewer pages). Also
+    cheap.
+  - **`-c` in `/opt/llama-swap/config.yaml`** = bump model context window.
+    Qwen3-30B-A3B is currently at `65536` (64K). Can go higher with YaRN but
+    costs more VRAM+GTT (KV cache scales linearly with context). After
+    edit: `systemctl restart llama-swap`.
+
+### "Retrieved N sources" but model says "sources are generic search queries"
+
+- Means SearXNG returned URLs but the content loader didn't fetch (or
+  fetched but extracted nothing). Model sees URL strings, no page text.
+- Most likely cause: **Bypass Web Loader is ON** in admin → Web Search.
+  Toggle it OFF and Save. Then `docker restart open-webui`.
+- Second cause: **Default loader on JS-heavy pages.** Yahoo Finance and
+  similar SPAs render to empty `<div id="root"></div>` shells from a plain
+  `requests` GET. Switch to Playwright (step 8c).
+- Verify in Open WebUI logs: `docker logs -f open-webui | grep -iE "loader|fetch|playwright"` while sending a test message. Should see fetch+extract entries per URL.
+
+### Playwright loader fails with "browser closed unexpectedly" / "connection refused"
+
+- `cloakbrowser` container died or didn't start. Check
+  `docker ps | grep cloakbrowser` — must be Up. If exited,
+  `docker logs cloakbrowser` for the reason.
+- Connection refused: `PLAYWRIGHT_WS_URL` is wrong. With CloakBrowser must
+  be exactly `http://127.0.0.1:9222` (CDP). With browserless it was
+  `ws://127.0.0.1:3000/chromium/playwright` (Playwright WS). Schemes are
+  load-bearing — the patched `utils.py` dispatches on `http://` vs `ws://`.
+- "Connection failed" but smoke test in step 8c works → patched `utils.py`
+  isn't actually mounted. Verify with:
+  ```bash
+  docker exec open-webui grep -c connect_over_cdp /app/backend/open_webui/retrieval/web/utils.py  # expect ≥ 2
+  docker exec open-webui grep -c domcontentloaded   /app/backend/open_webui/retrieval/web/utils.py  # expect 2
+  ```
+- After `docker pull ghcr.io/open-webui/open-webui:main` the patched file
+  may need re-derivation if upstream `utils.py` structure drifted.
+
+### SearXNG returns HTML instead of JSON / Open WebUI sees no results
+
+- `search.formats` in `settings.yml` must include `json`. Default is HTML only.
+- Quick test: `curl 'http://127.0.0.1:8888/search?q=x&format=json'`. If you
+  get an HTML page, JSON is disabled and you need to edit `settings.yml` +
+  `docker restart searxng`.
+
 ### `vulkaninfo` works in LXC but ollama / llama.cpp finds no GPU
 
 - The bundled Vulkan loader in some binaries doesn't search the system
@@ -611,6 +1015,9 @@ On the LXC:
 | `/opt/llama-cpp/models/*.gguf` | Model weights |
 | `/opt/llama-swap/` | llama-swap binary + `config.yaml` |
 | `/opt/open-webui/data/` | Open WebUI database / uploads |
+| `/opt/searxng/{settings.yml,limiter.toml}` | SearXNG config (JSON format on, secret key, fanout engines) |
+| `/opt/open-webui/patches/utils.py` | Patched OWUI loader (CDP-aware), bind-mounted into the container |
+| `cloakbrowser` container (no host paths) | Stealth Chromium via CDP on :9222 for JS-heavy / bot-walled pages |
 | `/etc/systemd/system/llama-swap.service` | systemd unit |
 | `/etc/pve/lxc/102.conf` (on the **host**) | `lxc.mount.entry` for /dev/dri |
 
@@ -621,6 +1028,12 @@ On the LXC:
 - llama.cpp releases: https://github.com/ggml-org/llama.cpp/releases
 - llama-swap: https://github.com/mostlygeek/llama-swap
 - Open WebUI: https://github.com/open-webui/open-webui
+- Open WebUI web search docs: https://docs.openwebui.com/category/-web-search
+- SearXNG: https://github.com/searxng/searxng
+- SearXNG settings reference: https://docs.searxng.org/admin/settings/index.html
+- CloakBrowser: https://github.com/CloakHQ/CloakBrowser (stealth Chromium, CDP, drop-in Playwright via patched loader)
+- Open WebUI Playwright loader: https://docs.openwebui.com/category/-web-search (Loader Engine section)
+- Open WebUI loader source: https://github.com/open-webui/open-webui/blob/main/backend/open_webui/retrieval/web/utils.py (track upstream changes when re-patching)
 - llmfit (model picker for given hardware): https://github.com/AlexsJones/llmfit
 - Why iGPU passthrough fails on Phoenix:
   - https://github.com/xCuri0/ReBarUEFI
