@@ -247,6 +247,7 @@ choice on a slow iGPU — total quality of 30B+, inference cost of ~3B.
 | Model | Quant | Size | Best for | Notes |
 |---|---|---|---|---|
 | Qwen3-30B-A3B-Instruct-2507 | Q6_K | 24 GB | general / reasoning | 3B active / 30B total, 64K ctx (bumped from 32K for web-search headroom; ~32 GB total VRAM+GTT) |
+| Qwen3-8B (dense) | Q6_K | 6.3 GB | daily / tool use / Hermes-style heavy system prompts | **1.5x faster prompt processing** than 30B-A3B (234 vs 158 tok/s); slower TG (12 vs 27); two variants registered: `qwen3-8b` (`--reasoning off`) for fast daily, `qwen3-8b-think` (`--reasoning on`) for chain-of-thought |
 | Qwen3-Coder-30B-A3B-Instruct | Q6_K | 24 GB | coding | same arch as above, coder fine-tune |
 | LFM2-24B-A2B | Q8_0 | 24 GB | fast general | 2B active, fastest TG (~29 tok/s) |
 | DeepSeek-Coder-V2-Lite-Instruct | Q8_0 | 16 GB | lightweight code | 2.4B active, fast pp |
@@ -298,7 +299,7 @@ macros:
   "llama-bin":  "/opt/llama-cpp/llama-b9415/llama-server --host 127.0.0.1 --port ${PORT}"
   "vulkan-env": "LD_LIBRARY_PATH=/opt/llama-cpp/llama-b9415"
   "models":     "/opt/llama-cpp/models"
-  "shared":     "-ngl 99 --threads 8 --jinja --flash-attn auto"
+  "shared":     "-ngl 99 --threads 8 --jinja --flash-attn auto --cache-reuse 64"
 
 models:
   "qwen3-30b":
@@ -311,6 +312,30 @@ models:
       ${shared}
     env: ["${vulkan-env}"]
     aliases: ["qwen3", "default"]
+
+  "qwen3-8b":
+    name: "Qwen3 8B (no-think, fast)"
+    description: "Daily, tool use · 8B dense · 64K ctx · reasoning disabled"
+    cmd: |
+      ${llama-bin}
+      --model ${models}/qwen3-8b-q6.gguf
+      -c 65536
+      ${shared}
+      --reasoning off
+    env: ["${vulkan-env}"]
+    aliases: ["qwen8", "small", "daily"]
+
+  "qwen3-8b-think":
+    name: "Qwen3 8B (thinking)"
+    description: "Reasoning mode · 8B dense · 64K ctx · reasoning_content split"
+    cmd: |
+      ${llama-bin}
+      --model ${models}/qwen3-8b-q6.gguf
+      -c 65536
+      ${shared}
+      --reasoning on
+    env: ["${vulkan-env}"]
+    aliases: ["qwen8-think", "reasoning"]
 
   "qwen3-coder":
     name: "Qwen3 Coder 30B-A3B"
@@ -799,11 +824,44 @@ prompt=128, gen=64, 8 CPU threads:
 |---|---|---|
 | Qwen3-30B-A3B-Instruct Q6_K | 158 | 27.2 |
 | Qwen3-Coder-30B-A3B Q6_K | 154 | 27.1 |
+| **Qwen3-8B Q6_K (dense)** | **234** | 12.3 |
 | LiquidAI LFM2-24B-A2B Q8_0 | 189 | **29.3** |
 | DeepSeek-Coder-V2-Lite Q8_0 | **244** | 27.5 |
 
 These are real numbers, not vendor estimates. The 780M Vulkan stack is
 roughly half the speed of an M5 Metal stack on the same model.
+
+### Hitting the iGPU ceiling — what makes it faster, what doesn't
+
+Phoenix1 iGPU on Vulkan is fundamentally **memory-bandwidth bound for TG**
+and **compute / kernel-launch bound for PP**. DDR5-5600 dual-channel ≈ 90
+GB/s, shared with CPU. We tested every knob:
+
+- **`echo high > .../power_dpm_force_performance_level`** (force max SCLK
+  2700 MHz): zero throughput change. AMD's `gpu_busy_percent` shows 99%
+  but compute units are starved waiting on memory.
+- **`-b 2048 --ubatch-size 512`** (bigger prompt batch): zero change.
+  Kernel launch is the choke, not batch.
+- **`--cache-reuse 64`** (prefix KV reuse): only helps on repeat turns
+  where the system prompt + tools is identical; massive win for Hermes-style
+  agents that re-send the same 18K+-token preamble every turn.
+
+What actually moves the needle:
+
+| Path | Realistic TG speedup | Notes |
+|---|---|---|
+| External dGPU (RTX 3090, 7900 XTX) over oculink/eGPU | **10-15x** | bandwidth jumps to ~950 GB/s |
+| Mac Mini M4 Pro (~270 GB/s unified) | 3-4x | better wattage too |
+| DDR5-7200 sticks (if UM780 XTX BIOS supports) | ~1.3x | cheapest hardware tweak |
+| Smaller dense model | wins PP, loses TG | dense 8B reads 6 GB/token; MoE 30B-A3B reads ~3 GB/token (active params), so MoE wins TG, dense wins PP |
+
+### Picking between qwen3-8b and qwen3-30b
+
+| Workload shape | Use |
+|---|---|
+| Short prompt + long reply (chat, story, code completion) | **qwen3-30b** (2x TG) |
+| Long prompt + short reply (agentic tool calls, RAG, code review) | **qwen3-8b** (1.5x PP) |
+| Hermes Agent (18K system prompt, terse replies) | **qwen3-8b** by default; switch via `hermes config set model.default qwen3-30b` for prose |
 
 ---
 
@@ -852,6 +910,19 @@ pct exec 102 -- curl -s "http://127.0.0.1:8888/search?q=anthropic&format=json" \
 
 # Expand LXC disk
 pct resize 102 rootfs +50G
+
+# Point an OpenAI-SDK client (e.g. Hermes Agent) at the local stack.
+# Use the direct LXC IP, NOT the gateway — Cilium HTTPRoute defaults to a 15s
+# upstream timeout and big prompts will 504. Direct path has no such cap.
+hermes config set model.provider custom
+hermes config set model.default qwen3-8b
+hermes config set model.base_url http://10.0.10.79:11434/v1
+hermes config set model.context_length 64000
+
+# Switch model on the fly (no restart) — all in the same chat:
+hermes config set model.default qwen3-30b    # prose / long-form
+hermes config set model.default qwen3-8b     # tool calls / RAG
+hermes config set model.default fast         # LFM2 for snappy chat
 ```
 
 ---
@@ -880,6 +951,32 @@ If the address ever changes anyway, update the
 - `docker logs open-webui` — should show successful startup, not connection
   errors to the API base URL.
 - Check `OPENAI_API_BASE_URL` env on the container; needs the `/v1` suffix.
+
+### Gateway 504 on big-prompt requests (Hermes / RAG)
+
+- Cilium HTTPRoute default upstream timeout = **15 s**. llama-swap journal
+  shows `proxy error: context canceled` + `status=502 ... 15.000s` —
+  gateway dropped the connection before llama-server finished prompt
+  processing.
+- Quick fix: client points at the LXC IP directly
+  (`http://10.0.10.79:11434/v1`) instead of `https://llm.home.0dl.me/v1`.
+  Skips the gateway. Used for Hermes per the ops cheatsheet above.
+- Proper fix (when you want HTTPS LAN for all clients): add
+  `spec.rules[].timeouts.request: 5m` to the llm HTTPRoute in
+  `manifests/llm.yaml` (Gateway API v1.1+, Cilium supports it).
+- DON'T pile on retries from the client — every retry restarts the cold
+  load. One client retry with `--no-retry` style flag is fine; three is a
+  death spiral.
+
+### llama-server hung after a client disconnect (zero CPU, ESTAB conn but no progress)
+
+- Happens after Hermes/curl times out mid-prompt and bails. llama-server
+  keeps the half-processed request slot busy and subsequent requests queue
+  forever.
+- Fix: `systemctl restart llama-swap` on the LXC. Brutal but immediate.
+- Prevention: cap client timeout at less than llama-server's
+  `healthCheckTimeout` (300s in our config). Most OpenAI SDKs default 600s
+  which is far too long for this hardware.
 
 ### Inference falls back to CPU (very slow, ~5 tok/s on a 30B)
 
