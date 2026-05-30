@@ -1,0 +1,117 @@
+# LLM — llama.cpp Vulkan server running OUTSIDE the cluster on Proxmox LXC 102
+# (ollama-llm at 10.0.10.79:11434). Phoenix1 iGPU passthrough to a VM proved
+# impossible on Minisforum UM780 XTX (stock BIOS doesn't honor ReBAR for iGPU,
+# no community workaround exists for Linux guests), so the LLM stack lives in a
+# privileged LXC with /dev/dri bind-mounted from the host. Backend is llama.cpp
+# b9415 Vulkan via Mesa RADV; default model is Qwen3-30B-A3B-Instruct Q6_K.
+#
+# Because the workload isn't in-cluster, this manifest uses a selector-less
+# Service + a hand-maintained EndpointSlice pointing at the LXC IP — same
+# shape Cilium needs to back an HTTPRoute against an off-cluster endpoint.
+#
+# Exposure: LAN only via *.home.0dl.me wildcard cert at the gateway. No
+# Cloudflare Tunnel published route (LLM is intentionally LAN-private — adding
+# CF later means a DNS CNAME + Tunnel UI entry like the other apps).
+#
+# If LXC IP changes (DHCP renewal), update the EndpointSlice addresses field.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+---
+# Selector-less Service: routes to the EndpointSlice below, not a Pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm
+  namespace: llm
+  labels: {app: llm}
+spec:
+  type: ClusterIP
+  ports:
+    - {name: http, port: 11434, targetPort: 11434, protocol: TCP}
+---
+# Manual EndpointSlice pointing at the off-cluster LXC. The label
+# `kubernetes.io/service-name: llm` is what binds it to the Service above.
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: llm-lxc-102
+  namespace: llm
+  labels:
+    kubernetes.io/service-name: llm
+    app: llm
+addressType: IPv4
+ports:
+  - {name: http, port: 11434, protocol: TCP}
+endpoints:
+  - addresses: ["10.0.10.79"]
+    conditions: {ready: true}
+---
+# LAN route — TLS terminated at the gateway via the *.home.0dl.me wildcard.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: llm
+  namespace: llm
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+  hostnames:
+    - llm.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: llm
+          port: 11434
+---
+# Open WebUI (chat.home.0dl.me) — Docker container in LXC 102 on port 8080.
+# Same shape as the llama-swap exposure above; points at the same backing IP
+# (10.0.10.79). Open WebUI talks to llama-swap over 127.0.0.1:11434 inside the
+# LXC, so this route only needs to reach the UI's HTTP listener.
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-ui
+  namespace: llm
+  labels: {app: llm-ui}
+spec:
+  type: ClusterIP
+  ports:
+    - {name: http, port: 8080, targetPort: 8080, protocol: TCP}
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: llm-ui-lxc-102
+  namespace: llm
+  labels:
+    kubernetes.io/service-name: llm-ui
+    app: llm-ui
+addressType: IPv4
+ports:
+  - {name: http, port: 8080, protocol: TCP}
+endpoints:
+  - addresses: ["10.0.10.79"]
+    conditions: {ready: true}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: llm-ui
+  namespace: llm
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+  hostnames:
+    - chat.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: llm-ui
+          port: 8080

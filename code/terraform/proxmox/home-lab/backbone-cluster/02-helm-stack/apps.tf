@@ -13,6 +13,7 @@ locals {
     dashy           = "${path.module}/manifests/dashy.yaml"
     filebrowser     = "${path.module}/manifests/filebrowser.yaml"
     jellyfin        = "${path.module}/manifests/jellyfin.yaml"
+    llm             = "${path.module}/manifests/llm.yaml"
     memos           = "${path.module}/manifests/memos.yaml"
     qbittorrent_qui = "${path.module}/manifests/qbittorrent-qui.yaml"
     syncthing       = "${path.module}/manifests/syncthing.yaml"
