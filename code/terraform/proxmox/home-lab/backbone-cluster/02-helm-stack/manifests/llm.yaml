@@ -9,9 +9,10 @@
 # Service + a hand-maintained EndpointSlice pointing at the LXC IP — same
 # shape Cilium needs to back an HTTPRoute against an off-cluster endpoint.
 #
-# Exposure: LAN only via *.home.0dl.me wildcard cert at the gateway. No
-# Cloudflare Tunnel published route (LLM is intentionally LAN-private — adding
-# CF later means a DNS CNAME + Tunnel UI entry like the other apps).
+# Exposure: LAN via *.home.0dl.me wildcard cert at the gateway, plus the
+# Open WebUI front-end (chat) on bare 0dl.me via Cloudflare Tunnel. The
+# llama-swap API itself stays LAN-only — exposing raw inference to the
+# public internet is not the intent.
 #
 # If LXC IP changes (DHCP renewal), update the EndpointSlice addresses field.
 
@@ -111,6 +112,33 @@ spec:
       namespace: gateway-system
   hostnames:
     - chat.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: llm-ui
+          port: 8080
+---
+# Tunnel route — bare chat.0dl.me via Cloudflare Tunnel. HTTP-only at the
+# gateway (CF terminates TLS at the edge), so bind to the :http listener.
+# Manual Cloudflare-side follow-ups (can't be terraformed here):
+#   1. Cloudflare DNS: add CNAME `chat.0dl.me` → `<tunnel-id>.cfargotunnel.com`
+#      (look up the tunnel ID jellyfin/memos/trilium/siyuan already use).
+#   2. Cloudflare Tunnel "Published application routes" UI:
+#        Subdomain: chat / Domain: 0dl.me / Path: empty (match all paths)
+#        Service: HTTP → 10.0.10.212  (gateway external IP)
+#      The empty Path is critical — see the immich incident where a leftover
+#      `^/blog` regex blocked everything but /blog requests.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: llm-ui-tunnel
+  namespace: llm
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+      sectionName: http
+  hostnames:
+    - chat.0dl.me
   rules:
     - backendRefs:
         - name: llm-ui

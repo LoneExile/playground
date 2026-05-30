@@ -1,7 +1,14 @@
 # Self-Hosted Local LLM on AMD Radeon 780M iGPU
 
-Reproduction guide for the LLM stack at `https://llm.home.0dl.me` (API) and
-`https://chat.home.0dl.me` (Open WebUI).
+Reproduction guide for the LLM stack at:
+
+- `https://llm.home.0dl.me` — llama-swap OpenAI-compatible API (LAN only)
+- `https://chat.home.0dl.me` — Open WebUI (LAN only)
+- `https://chat.0dl.me` — Open WebUI (public, via Cloudflare Tunnel)
+
+The llama-swap API itself is intentionally LAN-only — exposing raw inference
+to the public internet is not the goal. Only the chat UI is on the public
+bare domain.
 
 End state: a privileged LXC on the Proxmox host (`pve`, Minisforum UM780 XTX,
 Ryzen 7 7840HS + Radeon 780M) runs `llama-swap` in front of multiple `llama.cpp`
@@ -15,17 +22,25 @@ hardware, see "Why not VM passthrough" below.
 ## TL;DR architecture
 
 ```
-client → https://{llm,chat}.home.0dl.me (TLS, wildcard *.home.0dl.me)
-       → MetalLB ext IP 10.0.10.212 (backbone-gateway)
-       → HTTPRoute (llm | llm-ui in namespace llm)
-       → Service (llm | llm-ui, selector-less)
-       → EndpointSlice → 10.0.10.79:11434 | :8080
-       → LXC 102 "ollama-llm" on pve
-         ├── llama-swap            :11434 (proxy)
-         │   └── spawns llama-server on ${PORT} per requested model
-         │       └── llama.cpp Vulkan b9415 → Mesa RADV → 780M iGPU
-         └── open-webui (Docker)  :8080
-             └── OPENAI_API_BASE_URL=http://127.0.0.1:11434/v1
+LAN clients:
+  client → https://{llm,chat}.home.0dl.me  (TLS, wildcard *.home.0dl.me)
+         → MetalLB ext IP 10.0.10.212:443  (backbone-gateway, :https listener)
+
+Public clients (chat UI only):
+  client → https://chat.0dl.me            (TLS terminated at CF edge)
+         → Cloudflare Tunnel
+         → 10.0.10.212:80                  (gateway :http listener)
+
+both paths from here on:
+  → HTTPRoute (llm | llm-ui | llm-ui-tunnel in namespace llm)
+  → Service (llm | llm-ui, selector-less)
+  → EndpointSlice → 10.0.10.79:11434 | :8080
+  → LXC 102 "ollama-llm" on pve
+    ├── llama-swap            :11434 (proxy)
+    │   └── spawns llama-server on ${PORT} per requested model
+    │       └── llama.cpp Vulkan b9415 → Mesa RADV → 780M iGPU
+    └── open-webui (Docker)  :8080
+        └── OPENAI_API_BASE_URL=http://127.0.0.1:11434/v1
 ```
 
 GPU pool: UMA 16 GB (BIOS-reserved VRAM) + ~39 GB GTT (dynamic system-RAM
@@ -395,13 +410,41 @@ cd 02-helm-stack
 terraform apply -var-file=../terraform.tfvars
 ```
 
-Two HTTPRoutes are created:
+Three HTTPRoutes are created:
 
-- `llm.home.0dl.me` → Service `llm:11434` → llama-swap API
-- `chat.home.0dl.me` → Service `llm-ui:8080` → Open WebUI
+- `llm.home.0dl.me` → Service `llm:11434` → llama-swap API (LAN, :https)
+- `chat.home.0dl.me` → Service `llm-ui:8080` → Open WebUI (LAN, :https)
+- `chat.0dl.me` → Service `llm-ui:8080` → Open WebUI (public, :http via CF Tunnel)
 
-TLS is terminated at the Envoy gateway via the wildcard `*.home.0dl.me`
-cert. Same `parentRefs: backbone-gateway` as every other app in the stack.
+LAN routes terminate TLS at the Envoy gateway via the wildcard `*.home.0dl.me`
+cert. The bare-domain tunnel route uses `parentRefs.sectionName: http` to bind
+to the gateway's plaintext listener — Cloudflare terminates TLS at the edge
+and speaks HTTP back through the tunnel.
+
+### Cloudflare side (manual, can't be terraformed)
+
+After `terraform apply` creates the `llm-ui-tunnel` HTTPRoute, set up the
+Cloudflare side (same shape as the existing siyuan/dashy/jellyfin tunnel
+entries — reuse the existing tunnel, don't create a new one):
+
+1. Cloudflare DNS: add `CNAME` record
+   - Name: `chat`
+   - Target: `<tunnel-id>.cfargotunnel.com` (look up the tunnel ID used by
+     the other bare-domain apps)
+   - Proxy status: Proxied (orange cloud)
+
+2. Cloudflare → Zero Trust → Networks → Tunnels → (your tunnel) →
+   Public Hostnames → "Add a public hostname":
+   - Subdomain: `chat`
+   - Domain: `0dl.me`
+   - Path: **empty** (match all paths — don't put `/`)
+   - Service: `HTTP`
+   - URL: `10.0.10.212` (the gateway external IP, **not** the LXC IP —
+     the gateway does host-header routing)
+
+⚠️ The empty Path is critical. Putting `/` or a regex like `^/chat` will
+break it — see the immich incident where a leftover regex blocked everything
+but matching paths.
 
 ### 10. Verify end-to-end
 
@@ -418,8 +461,18 @@ curl -s https://llm.home.0dl.me/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"default","messages":[{"role":"user","content":"hi"}],"max_tokens":20}'
 
-# Open WebUI
+# Open WebUI (LAN)
 curl -s -o /dev/null -w "%{http_code}\n" https://chat.home.0dl.me/
+#   200
+
+# Open WebUI (public via Cloudflare Tunnel — only after CF DNS + tunnel mapping)
+curl -s -o /dev/null -w "%{http_code}\n" https://chat.0dl.me/
+#   200
+
+# Simulate the CF Tunnel hop directly (bypass CF, hit the gateway HTTP listener
+# with the Host header it would forward). Useful when public URL fails — proves
+# whether the gateway/HTTPRoute or the CF side is at fault.
+curl -s -H "Host: chat.0dl.me" -o /dev/null -w "%{http_code}\n" http://10.0.10.212/
 #   200
 ```
 
