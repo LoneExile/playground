@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Round B — Cilium BGP. Pre-req: Cilium with bgpControlPlane.enabled=true.
+# Do NOT apply while MetalLB (Round A) is active.
+# Apply:  kubectl apply -k round-b-cilium/
+resources:
+  - cilium-bgp.yaml
+  - ../demo

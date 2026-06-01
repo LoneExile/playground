@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Round A — MetalLB BGP. Pre-req: MetalLB installed (metallb-system ns).
+# Apply:  kubectl apply -k round-a-metallb/
+resources:
+  - metallb-bgp.yaml
+  - ../demo

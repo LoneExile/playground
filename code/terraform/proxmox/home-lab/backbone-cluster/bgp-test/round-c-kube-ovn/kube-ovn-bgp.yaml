@@ -1,0 +1,47 @@
+# Round C — Kube-OVN BGP via kube-ovn-speaker DaemonSet.
+# Pre-req: Kube-OVN is the CNI (mutually exclusive with Cilium/Calico).
+# Speaker peers UDM-SE ASN 65000 at 10.0.10.1; cluster ASN 65001.
+# After applying, mark what to advertise (subnet / pod / svc):
+#   kubectl annotate subnet <subnet>  ovn.kubernetes.io/bgp=true
+#   kubectl annotate pod    <pod>     ovn.kubernetes.io/bgp=true
+#   # EIP/Service: set ovn.kubernetes.io/bgp=true on the resource.
+# Image tag: match your installed Kube-OVN version.
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kube-ovn-speaker
+  namespace: kube-system
+  labels:
+    app: kube-ovn-speaker
+spec:
+  selector:
+    matchLabels:
+      app: kube-ovn-speaker
+  template:
+    metadata:
+      labels:
+        app: kube-ovn-speaker
+    spec:
+      hostNetwork: true
+      serviceAccountName: ovn        # reuse kube-ovn SA (has needed RBAC)
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+        - name: kube-ovn-speaker
+          image: kubeovn/kube-ovn:v1.13.0   # <-- pin to your installed version
+          command: ["/kube-ovn/kube-ovn-speaker"]
+          args:
+            - --neighbor-address=10.0.10.1
+            - --neighbor-as=65000
+            - --cluster-as=65001
+            - --announce-cluster-ip=true
+            - --auth-mode=password         # drop if no md5 password on peer
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN", "NET_RAW"]
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP

@@ -1,0 +1,63 @@
+# Round B — Cilium BGP Control Plane (v1.16+ API: CiliumBGPClusterConfig).
+# Pre-req: Cilium installed with BGP enabled:
+#   helm upgrade cilium ... --set bgpControlPlane.enabled=true
+#   (legacy CiliumBGPPeeringPolicy is the OLD API — do not mix.)
+# Cluster ASN 65001 peers UDM-SE ASN 65000 at 10.0.10.1.
+# Advertises LoadBalancer service IPs labelled advertise=bgp.
+# Do NOT run MetalLB at the same time.
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumBGPClusterConfig
+metadata:
+  name: cilium-bgp
+spec:
+  nodeSelector:
+    matchLabels: {}          # all nodes peer
+  bgpInstances:
+    - name: "inst-65001"
+      localASN: 65001
+      peers:
+        - name: udmse
+          peerASN: 65000
+          peerAddress: 10.0.10.1
+          peerConfigRef:
+            name: udmse
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumBGPPeerConfig
+metadata:
+  name: udmse
+spec:
+  families:
+    - afi: ipv4
+      safi: unicast
+      advertisements:
+        matchLabels:
+          advertise: bgp
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumBGPAdvertisement
+metadata:
+  name: lb-services
+  labels:
+    advertise: bgp
+spec:
+  advertisements:
+    - advertisementType: Service
+      service:
+        addresses:
+          - LoadBalancerIP
+      selector:
+        matchLabels:
+          bgp: announce       # demo svc carries this label
+    # --- advertise pod CIDRs instead/as-well (uncomment) ---
+    # - advertisementType: PodCIDR
+---
+# LB IP pool — Cilium hands these to LoadBalancer services (replaces MetalLB pool).
+apiVersion: cilium.io/v2alpha1
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: bgp-pool
+spec:
+  blocks:
+    - cidr: 10.0.30.0/24

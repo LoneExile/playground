@@ -1,0 +1,37 @@
+# Round A — MetalLB in BGP mode.
+# Pre-req: MetalLB installed (helm/manifest), namespace metallb-system.
+#   Do NOT run this alongside Cilium BGP — they fight over LB IP announces.
+# Peers MetalLB speakers (ASN 65001) to the UDM-SE (ASN 65000) at 10.0.10.1.
+# Advertises pool 10.0.30.0/24 — must NOT overlap 10.0.10.0/24 (learned via BGP).
+---
+apiVersion: metallb.io/v1beta2
+kind: BGPPeer
+metadata:
+  name: udmse
+  namespace: metallb-system
+spec:
+  myASN: 65001
+  peerASN: 65000
+  peerAddress: 10.0.10.1
+  # Optional BFD profile for fast failover — uncomment + define a BFDProfile.
+  # bfdProfile: fast
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: bgp-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 10.0.30.0/24
+  autoAssign: true
+---
+apiVersion: metallb.io/v1beta1
+kind: BGPAdvertisement
+metadata:
+  name: bgp-adv
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - bgp-pool
+  # aggregationLength: 32   # advertise each /32 host route (default)

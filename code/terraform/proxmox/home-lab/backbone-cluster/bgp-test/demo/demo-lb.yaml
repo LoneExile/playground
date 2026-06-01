@@ -1,0 +1,38 @@
+# Demo workload + LoadBalancer service to prove BGP announcement.
+# Label bgp=announce is what Cilium's CiliumBGPAdvertisement selector matches
+# (Round B). MetalLB (Round A) ignores the label and uses the pool directly.
+# After apply:  kubectl get svc bgp-demo  -> EXTERNAL-IP from 10.0.30.0/24.
+# From a LAN host:  curl http://<EXTERNAL-IP>   -> should hit nginx.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bgp-demo
+  labels: {app: bgp-demo}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: bgp-demo}
+  template:
+    metadata:
+      labels: {app: bgp-demo}
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bgp-demo
+  labels:
+    bgp: announce          # matched by Cilium advertisement selector
+spec:
+  type: LoadBalancer
+  selector: {app: bgp-demo}
+  ports:
+    - port: 80
+      targetPort: 80
+  # externalTrafficPolicy: Local  # preserve client src IP; needs node-local pods

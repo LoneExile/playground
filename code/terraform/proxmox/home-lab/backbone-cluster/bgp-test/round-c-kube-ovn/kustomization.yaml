@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Round C — Kube-OVN BGP. Pre-req: Kube-OVN is the CNI (not Cilium).
+# Pin the image tag in kube-ovn-bgp.yaml first. After apply, annotate the
+# subnet:  kubectl annotate subnet ovn-default ovn.kubernetes.io/bgp=true
+# Apply:  kubectl apply -k round-c-kube-ovn/
+resources:
+  - kube-ovn-bgp.yaml
+  - ../demo
