@@ -163,6 +163,43 @@ variable "siyuan_access_auth_code" {
   sensitive   = true
 }
 
+# --- Reactive Resume ---
+# Used by manifests/reactive-resume.yaml (rendered via templatefile in apps.tf).
+# Stack is fresh on first deploy: postgres initdb creates the 'reactive_resume'
+# role from db_password; minio creates its root user from storage_secret_key; the
+# app signs auth tokens with the access/refresh secrets and talks to chrome with
+# chrome_token. Rotating db_password requires also resetting the role's password
+# (it's only read by initdb on an empty PGDATA); the others roll cleanly on apply.
+variable "reactive_resume_db_password" {
+  description = "Password for the 'reactive_resume' Postgres role. Set by initdb on first boot; embedded in DATABASE_URL. Generate with: openssl rand -base64 32"
+  type        = string
+  sensitive   = true
+}
+
+variable "reactive_resume_access_token_secret" {
+  description = "ACCESS_TOKEN_SECRET — signs short-lived JWT access tokens. Rotating invalidates active access tokens. Generate with: openssl rand -base64 64"
+  type        = string
+  sensitive   = true
+}
+
+variable "reactive_resume_refresh_token_secret" {
+  description = "REFRESH_TOKEN_SECRET — signs refresh tokens. Rotating forces all users to re-login. Generate with: openssl rand -base64 64"
+  type        = string
+  sensitive   = true
+}
+
+variable "reactive_resume_chrome_token" {
+  description = "CHROME_TOKEN — shared secret the app uses to authenticate to the browserless chrome printer. Generate with: openssl rand -hex 32"
+  type        = string
+  sensitive   = true
+}
+
+variable "reactive_resume_storage_secret_key" {
+  description = "Minio root password = app STORAGE_SECRET_KEY. Must be >=8 chars. Generate with: openssl rand -base64 24"
+  type        = string
+  sensitive   = true
+}
+
 # --- Inherit harmless 01-stage vars so shared terraform.tfvars doesn't error ---
 # Not used in this stage; declared only so Terraform doesn't complain about
 # "undeclared variable" when loading ../terraform.tfvars.

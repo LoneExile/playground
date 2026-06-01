@@ -32,6 +32,13 @@ locals {
     siyuan = templatefile("${path.module}/manifests/siyuan.yaml", {
       siyuan_access_auth_code = var.siyuan_access_auth_code
     })
+    reactive_resume = templatefile("${path.module}/manifests/reactive-resume.yaml", {
+      reactive_resume_db_password          = var.reactive_resume_db_password
+      reactive_resume_access_token_secret  = var.reactive_resume_access_token_secret
+      reactive_resume_refresh_token_secret = var.reactive_resume_refresh_token_secret
+      reactive_resume_chrome_token         = var.reactive_resume_chrome_token
+      reactive_resume_storage_secret_key   = var.reactive_resume_storage_secret_key
+    })
   }
 }
 

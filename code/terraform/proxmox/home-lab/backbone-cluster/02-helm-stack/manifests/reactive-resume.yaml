@@ -1,0 +1,493 @@
+# Reactive Resume (https://github.com/AmruthPillai/Reactive-Resume) — self-hosted
+# resume builder. Pinned to the stable v4.5.5 self-host stack (the upstream
+# `main` branch is unreleased v5 on Hono + SeaweedFS + Redis; the published
+# `amruthpillai/reactive-resume` image is v4). The v4 stack is four services:
+#
+#   app     amruthpillai/reactive-resume:v4.5.5  :3000   (stateless; Next/NestJS)
+#   postgres postgres:16                          :5432   data on NFS
+#   minio   minio/minio                           :9000   object store on NFS
+#   chrome  ghcr.io/browserless/chromium          :3000   PDF/preview printer (ephemeral)
+#
+# NFS layout (192.168.1.179:/zpool1/nfs_share) — same one-PV-at-root + subPath
+# pattern as immich/paperless/syncthing:
+#   config/reactive-resume/db    → /var/lib/postgresql/data on postgres (999:999, fresh)
+#   config/reactive-resume/minio → /data                    on minio    (1000:1000)
+# The app and chrome hold no persistent state, so only postgres + minio mount NFS.
+#
+# Exposure:
+#   App   https://resume.home.0dl.me        (LAN, wildcard cert)
+#         https://resume.0dl.me             (Cloudflare Tunnel)
+#   Minio https://resume-storage.home.0dl.me (LAN, wildcard cert)
+#         https://resume-storage.0dl.me     (Cloudflare Tunnel)
+# Minio MUST be browser-reachable: the app hands clients absolute URLs under
+# STORAGE_URL to fetch avatars and exported PDFs. PUBLIC_URL / STORAGE_URL are
+# pinned to the public (tunnel) hostnames so resume share links resolve both on
+# LAN and from the public internet. RR's StorageService creates the `default`
+# bucket and sets an anonymous-read policy on first boot (STORAGE_SKIP_BUCKET_CHECK
+# = false), so public GETs of stored objects work without extra minio config.
+#
+# This manifest is rendered via templatefile() in apps.tf. The real values for
+# the $${reactive_resume_*} placeholders come from sensitive variables in
+# 02-helm-stack/variables.tf, populated from terraform.tfvars (gitignored).
+#
+# DEPLOY STEPS:
+#   1. Add the five secrets to ../terraform.tfvars:
+#        reactive_resume_db_password         = "$(openssl rand -base64 32)"
+#        reactive_resume_access_token_secret = "$(openssl rand -base64 64)"
+#        reactive_resume_refresh_token_secret= "$(openssl rand -base64 64)"
+#        reactive_resume_chrome_token        = "$(openssl rand -hex 32)"
+#        reactive_resume_storage_secret_key  = "$(openssl rand -base64 24)"   # minio root password, >=8 chars
+#   2. terraform apply (from 02-helm-stack/).
+#   3. Cloudflare-side (manual, can't be terraformed here) — for BOTH public hosts:
+#        a. DNS: add CNAME `resume.0dl.me` and `resume-storage.0dl.me`
+#             → `<tunnel-id>.cfargotunnel.com` (same tunnel chat/immich use).
+#        b. Tunnel "Published application routes" UI, one row each:
+#             Subdomain: resume          / Domain: 0dl.me / Path: empty
+#             Subdomain: resume-storage  / Domain: 0dl.me / Path: empty
+#             Service: HTTP → 10.0.10.212  (gateway external IP)
+#           Empty Path is critical (see the immich `^/blog` regex incident).
+#   4. Watch rollout:
+#        kubectl -n reactive-resume get pods,jobs -w
+#        kubectl -n reactive-resume logs -f deploy/app          # waits for prisma migrate
+#   5. Open https://resume.home.0dl.me, register your account (signups are open).
+#   6. FOLLOW-UP — lock down signups once your account exists: set
+#        DISABLE_SIGNUPS: "true" on deploy/app below and re-apply. Optionally
+#        wire Cloudflare Access on resume.0dl.me (currently unauthenticated edge).
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: reactive-resume
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+---
+# Static PV — bind explicitly, no provisioner. Same one-PV-at-NAS-root pattern
+# as immich/paperless; deployments use subPath to scope to their subtree.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: reactive-resume-nas
+spec:
+  capacity: {storage: 1Ti}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions: [nfsvers=4.1, nolock, noatime]
+  nfs:
+    server: 192.168.1.179
+    path: /zpool1/nfs_share
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: reactive-resume-nas
+  namespace: reactive-resume
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: reactive-resume-nas
+  resources:
+    requests: {storage: 1Ti}
+---
+# Secret — values rendered by templatefile() at terraform apply time.
+# database-url embeds the password so the app reads a single DATABASE_URL.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: reactive-resume-secrets
+  namespace: reactive-resume
+type: Opaque
+stringData:
+  postgres-password: "${reactive_resume_db_password}"
+  database-url: "postgresql://reactive_resume:${reactive_resume_db_password}@postgres:5432/reactive_resume?schema=public"
+  access-token-secret: "${reactive_resume_access_token_secret}"
+  refresh-token-secret: "${reactive_resume_refresh_token_secret}"
+  chrome-token: "${reactive_resume_chrome_token}"
+  storage-secret-key: "${reactive_resume_storage_secret_key}"
+---
+# Postgres 16 (debian) — fresh PGDATA on NFS. Uses uid 999 like the proven
+# immich PG-on-this-NFS setup (the official debian image's postgres user is
+# 999; alpine's is 70). initContainer chowns + chmod 700 because k8s
+# auto-creates the subPath root-owned and initdb refuses a non-700 PGDATA.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: reactive-resume
+  labels: {app: postgres}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      initContainers:
+        - name: pgdata-prep
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              chown 999:999 /var/lib/postgresql/data
+              chmod 700 /var/lib/postgresql/data
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - {name: nas, mountPath: /var/lib/postgresql/data, subPath: config/reactive-resume/db}
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - {name: postgres, containerPort: 5432}
+          env:
+            - {name: POSTGRES_USER, value: reactive_resume}
+            - {name: POSTGRES_DB,   value: reactive_resume}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: reactive-resume-secrets, key: postgres-password}
+            - {name: POSTGRES_INITDB_ARGS, value: "--data-checksums"}
+            - {name: PGDATA, value: /var/lib/postgresql/data}
+          volumeMounts:
+            - {name: nas,  mountPath: /var/lib/postgresql/data, subPath: config/reactive-resume/db}
+            - {name: dshm, mountPath: /dev/shm}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits:   {cpu: "1",  memory: 1Gi}
+          readinessProbe:
+            exec: {command: [pg_isready, -U, reactive_resume, -d, reactive_resume]}
+            initialDelaySeconds: 5
+          livenessProbe:
+            exec: {command: [pg_isready, -U, reactive_resume, -d, reactive_resume]}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: nas
+          persistentVolumeClaim:
+            claimName: reactive-resume-nas
+        - name: dshm
+          emptyDir: {medium: Memory, sizeLimit: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: reactive-resume
+  labels: {app: postgres}
+spec:
+  type: ClusterIP
+  selector: {app: postgres}
+  ports:
+    - {name: postgres, port: 5432, targetPort: postgres}
+---
+# Minio — S3-compatible object store for uploaded avatars + exported PDFs.
+# Runs as uid 1000; initContainer chowns the NFS subPath to match. MINIO_ROOT_USER
+# must equal the app's STORAGE_ACCESS_KEY; password comes from the shared secret.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: reactive-resume
+  labels: {app: minio}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: minio}
+  template:
+    metadata:
+      labels: {app: minio}
+    spec:
+      initContainers:
+        - name: data-prep
+          image: busybox:1.36
+          command: [sh, -c, "chown 1000:1000 /data"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - {name: nas, mountPath: /data, subPath: config/reactive-resume/minio}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args: [server, /data]
+          ports:
+            - {name: s3, containerPort: 9000}
+          env:
+            - {name: MINIO_ROOT_USER, value: reactive-resume}
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: reactive-resume-secrets, key: storage-secret-key}
+          volumeMounts:
+            - {name: nas, mountPath: /data, subPath: config/reactive-resume/minio}
+          resources:
+            requests: {cpu: 50m,  memory: 128Mi}
+            limits:   {cpu: 500m, memory: 512Mi}
+          readinessProbe:
+            httpGet: {path: /minio/health/ready, port: s3}
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /minio/health/live, port: s3}
+            initialDelaySeconds: 20
+            periodSeconds: 30
+      volumes:
+        - name: nas
+          persistentVolumeClaim:
+            claimName: reactive-resume-nas
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: reactive-resume
+  labels: {app: minio}
+spec:
+  type: ClusterIP
+  selector: {app: minio}
+  ports:
+    - {name: s3, port: 9000, targetPort: s3}
+---
+# Chrome (browserless/chromium) — headless print backend the app drives over a
+# websocket for PDF export and live previews. Stateless; no NFS. The app
+# authenticates with CHROME_TOKEN against the TOKEN set here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chrome
+  namespace: reactive-resume
+  labels: {app: chrome}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: chrome}
+  template:
+    metadata:
+      labels: {app: chrome}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: chrome
+          image: ghcr.io/browserless/chromium:latest
+          ports:
+            - {name: ws, containerPort: 3000}
+          env:
+            - {name: HEALTH, value: "true"}
+            - {name: PROXY_HOST, value: "chrome"}
+            - {name: PROXY_PORT, value: "3000"}
+            - {name: PROXY_SSL, value: "false"}
+            - name: TOKEN
+              valueFrom:
+                secretKeyRef: {name: reactive-resume-secrets, key: chrome-token}
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits:   {cpu: "2",  memory: 2Gi}
+          readinessProbe:
+            tcpSocket: {port: ws}
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket: {port: ws}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chrome
+  namespace: reactive-resume
+  labels: {app: chrome}
+spec:
+  type: ClusterIP
+  selector: {app: chrome}
+  ports:
+    - {name: ws, port: 3000, targetPort: ws}
+---
+# App — Reactive Resume server (UI + API in one image). Runs `prisma migrate
+# deploy` on boot, so the first start can take a minute; the startupProbe gives
+# it headroom before liveness kicks in. Waits for postgres to accept connections.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: reactive-resume
+  labels: {app: reactive-resume}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: reactive-resume}
+  template:
+    metadata:
+      labels: {app: reactive-resume}
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              for i in $(seq 1 120); do
+                pg_isready -h postgres -U reactive_resume -d reactive_resume && exit 0
+                sleep 2
+              done
+              echo "postgres never became ready" >&2
+              exit 1
+      containers:
+        - name: app
+          image: amruthpillai/reactive-resume:v4.5.5
+          ports:
+            - {name: http, containerPort: 3000}
+          env:
+            - {name: TZ, value: "Asia/Bangkok"}
+            - {name: PORT, value: "3000"}
+            - {name: NODE_ENV, value: "production"}
+            # Public-facing URLs — pinned to the tunnel hostnames so share links
+            # and stored-asset URLs resolve on LAN and from the public internet.
+            - {name: PUBLIC_URL,  value: "https://resume.0dl.me"}
+            - {name: STORAGE_URL, value: "https://resume-storage.0dl.me/default"}
+            # Database (Prisma) — full URL incl. password from the secret.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: reactive-resume-secrets, key: database-url}
+            # Auth token signing secrets.
+            - name: ACCESS_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef: {name: reactive-resume-secrets, key: access-token-secret}
+            - name: REFRESH_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef: {name: reactive-resume-secrets, key: refresh-token-secret}
+            # Printer (Chrome) — in-cluster websocket, token-authenticated.
+            - {name: CHROME_URL, value: "ws://chrome:3000"}
+            - name: CHROME_TOKEN
+              valueFrom:
+                secretKeyRef: {name: reactive-resume-secrets, key: chrome-token}
+            # Storage (Minio) — server-side S3 client talks to the in-cluster
+            # service; STORAGE_URL above is only for the URLs handed to browsers.
+            - {name: STORAGE_ENDPOINT, value: "minio"}
+            - {name: STORAGE_PORT,     value: "9000"}
+            - {name: STORAGE_REGION,   value: "us-east-1"}
+            - {name: STORAGE_BUCKET,   value: "default"}
+            - {name: STORAGE_ACCESS_KEY, value: "reactive-resume"}
+            - name: STORAGE_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: reactive-resume-secrets, key: storage-secret-key}
+            - {name: STORAGE_USE_SSL,          value: "false"}
+            - {name: STORAGE_SKIP_BUCKET_CHECK, value: "false"}
+            # Email — no SMTP wired; the app logs verification emails to stdout.
+            # Read them with: kubectl -n reactive-resume logs deploy/app
+            - {name: MAIL_FROM, value: "noreply@0dl.me"}
+            # Instance locked: account created, signups disabled. Flip back to
+            # "false" + re-apply only if you need to register another account.
+            - {name: DISABLE_SIGNUPS, value: "true"}
+          startupProbe:
+            httpGet: {path: /api/health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 60     # ~5 min cap on first-boot prisma migration
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits:   {cpu: "2",  memory: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+  namespace: reactive-resume
+  labels: {app: reactive-resume}
+spec:
+  type: ClusterIP
+  selector: {app: reactive-resume}
+  ports:
+    - {name: http, port: 3000, targetPort: http}
+---
+# LAN route — app, wildcard TLS at the gateway.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app
+  namespace: reactive-resume
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+  hostnames:
+    - resume.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: app
+          port: 3000
+---
+# Tunnel route — bare resume.0dl.me via Cloudflare Tunnel (CF terminates TLS;
+# bind to the :http listener). Requires the manual CF DNS + published-route
+# steps in the header. Unauthenticated at the edge for now.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app-tunnel
+  namespace: reactive-resume
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+      sectionName: http
+  hostnames:
+    - resume.0dl.me
+  rules:
+    - backendRefs:
+        - name: app
+          port: 3000
+---
+# LAN route — minio object store, wildcard TLS at the gateway.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: minio
+  namespace: reactive-resume
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+  hostnames:
+    - resume-storage.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: minio
+          port: 9000
+---
+# Tunnel route — bare resume-storage.0dl.me via Cloudflare Tunnel. Serves the
+# public asset URLs the app embeds (avatars, exported PDFs).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: minio-tunnel
+  namespace: reactive-resume
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+      sectionName: http
+  hostnames:
+    - resume-storage.0dl.me
+  rules:
+    - backendRefs:
+        - name: minio
+          port: 9000
