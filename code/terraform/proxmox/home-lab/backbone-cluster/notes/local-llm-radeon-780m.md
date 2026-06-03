@@ -1094,6 +1094,81 @@ If the address ever changes anyway, update the
 
 ---
 
+## Image generation (companion stack)
+
+Local text-to-image on the **same 780M iGPU**, in a separate privileged LXC
+(`103`, `image-gen`) running [`stable-diffusion.cpp`](https://github.com/leejet/stable-diffusion.cpp)
+— Vulkan / Mesa RADV, the same path as llama.cpp here (no ROCm, no VM
+passthrough). Provisioned by the `03-image-gen` Terraform stage (sibling of
+this LLM stack). Both LXCs share the same ~55 GB iGPU memory pool, so **don't
+keep a big LLM and a diffusion model resident at once** — VRAM+GTT will exhaust.
+
+- Backend: `sd-server` (built `-DSD_VULKAN=ON`) on `10.0.10.78:7860`.
+- API: A1111-compatible at `/sdapi/v1` (plus native `/sdcpp/v1`).
+- Default model: **SDXL-Turbo** (single-file, 1–4 steps, cfg 1.0). FLUX.1-schnell
+  also pulled; switch live with `pct exec 103 -- sd-switch flux`.
+- Gateway: `img.home.0dl.me` (LAN-only — `02-helm-stack/manifests/image-gen.yaml`).
+- Mitigations on by default: `--clip-on-cpu --vae-on-cpu --vae-tiling --diffusion-fa`.
+  Output on the 780M (gfx1103) is **clean** — the RDNA3 Vulkan distortion bug
+  reported on 890M/680M does NOT manifest here.
+- Measured: **~131 s/image** at 768×768, 4 steps (bandwidth-bound, not compute).
+
+### Wiring sd-server into Open WebUI (this LXC)
+
+Open WebUI's built-in image generation can drive sd-server via the A1111 engine.
+**Use the direct LXC URL, not the gateway** — a single image takes ~131 s and
+the Cilium HTTPRoute caps upstream at 15 s, so `img.home.0dl.me` would 504. Same
+gotcha as the llama-swap 504 above.
+
+On a fresh `webui.db`, set these env vars on the `docker run` (step 8):
+
+| Var | Value |
+|---|---|
+| `ENABLE_IMAGE_GENERATION` | `true` |
+| `IMAGE_GENERATION_ENGINE` | `automatic1111` |
+| `AUTOMATIC1111_BASE_URL` | `http://10.0.10.78:7860` |
+| `IMAGE_GENERATION_MODEL` | `sd_xl_turbo_1.0_fp16` (match the `title` from `/sdapi/v1/sd-models`) |
+| `IMAGE_SIZE` | `768x768` |
+| `IMAGE_STEPS` | `4` |
+
+⚠️ If `webui.db` already exists, **the DB overrides env** (see the web-search
+gotcha above) — env changes are ignored. Either set it in Admin → Settings →
+Images, or patch the DB directly. The persisted form is an `image_generation`
+block in the single-row `config` table:
+
+```json
+"image_generation": {
+  "enable": true, "engine": "automatic1111",
+  "model": "sd_xl_turbo_1.0_fp16", "size": "768x768", "steps": 4,
+  "automatic1111": {"base_url": "http://10.0.10.78:7860", "api_auth": ""}
+}
+```
+
+The LXC has no `sqlite3` CLI, but the OWUI container bundles python+sqlite —
+patch through it, then restart:
+
+```bash
+pct exec 102 -- docker exec -i open-webui python3 - <<'PY'
+import sqlite3, json
+con = sqlite3.connect('/app/backend/data/webui.db'); cur = con.cursor()
+cid, data = cur.execute('select id, data from config order by id desc limit 1').fetchone()
+d = json.loads(data)
+d['image_generation'] = {
+  "enable": True, "engine": "automatic1111",
+  "model": "sd_xl_turbo_1.0_fp16", "size": "768x768", "steps": 4,
+  "automatic1111": {"base_url": "http://10.0.10.78:7860", "api_auth": ""},
+}
+cur.execute('update config set data=? where id=?', (json.dumps(d), cid)); con.commit()
+print("patched config row", cid)
+PY
+pct exec 102 -- docker restart open-webui
+```
+
+In OWUI chat: send a prompt, click the image icon on the response. First image
+~2 min; if OWUI times out, drop to 512×512 or fewer steps.
+
+---
+
 ## File map
 
 In this repo:
@@ -1102,6 +1177,8 @@ In this repo:
 |---|---|
 | `02-helm-stack/manifests/llm.yaml` | Namespace, Services, EndpointSlices, HTTPRoutes |
 | `02-helm-stack/apps.tf` | Registers `llm` under `app_files` |
+| `02-helm-stack/manifests/image-gen.yaml` | `img.home.0dl.me` route → sd-server LXC 103 |
+| `03-image-gen/` | Companion stage — sd.cpp Vulkan image-gen LXC (own README) |
 | `notes/local-llm-radeon-780m.md` | This guide |
 
 On the LXC:
