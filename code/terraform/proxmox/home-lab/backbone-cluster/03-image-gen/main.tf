@@ -8,9 +8,14 @@
 # =============================================================================
 
 provider "proxmox" {
-  endpoint  = "https://${var.proxmox_host}:8006/"
-  api_token = "${var.proxmox_api_token_id}=${var.proxmox_api_token_secret}"
-  insecure  = true
+  endpoint = "https://${var.proxmox_host}:8006/"
+
+  # Password (root@pam ticket) auth, NOT an API token: Proxmox restricts
+  # container device_passthrough to root@pam — API tokens get HTTP 403
+  # "configuring device passthrough is only allowed for root@pam".
+  username = "root@pam"
+  password = var.proxmox_password
+  insecure = true
 
   ssh {
     agent    = false
@@ -51,13 +56,17 @@ locals {
 }
 
 # --- Debian 13 LXC template ---
+# overwrite_unmanaged adopts a template already present on the node (Proxmox
+# ships these in /var/lib/vz/template/cache) instead of erroring; still
+# downloads on a fresh node where it's absent.
 resource "proxmox_download_file" "debian13_lxc" {
-  content_type = "vztmpl"
-  datastore_id = var.template_datastore
-  node_name    = var.proxmox_node
-  url          = var.template_url
-  file_name    = var.template_file_name
-  overwrite    = false
+  content_type        = "vztmpl"
+  datastore_id        = var.template_datastore
+  node_name           = var.proxmox_node
+  url                 = var.template_url
+  file_name           = var.template_file_name
+  overwrite           = false
+  overwrite_unmanaged = true
 }
 
 # --- Container root password (output, for console/SSH fallback) ---

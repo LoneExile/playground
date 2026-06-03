@@ -249,8 +249,10 @@ variable "models" {
       url  = "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q4_1.gguf"
     },
     {
+      # black-forest-labs/FLUX.1-schnell is gated (401); second-state mirrors
+      # the same VAE ungated.
       file = "ae.safetensors"
-      url  = "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors"
+      url  = "https://huggingface.co/second-state/FLUX.1-schnell-GGUF/resolve/main/ae.safetensors"
     },
     {
       file = "clip_l.safetensors"

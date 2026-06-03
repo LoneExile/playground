@@ -78,9 +78,12 @@ Open WebUI has built-in image generation. Point it at this server:
 
 ## ⚠️ Expectations & gotchas
 
-- **No public 780M diffusion benchmarks exist** — these are estimates. Calibrate
-  on your own box. Rough: SDXL-Turbo 1024px **~15–60 s/image**, FLUX.1-schnell
-  **~1–4 min/image**. Bandwidth-bound (DDR5-5600 ~90 GB/s), not compute-bound.
+- **Measured on this box**: SDXL-Turbo 768×768, 4 steps, with the default
+  `--clip-on-cpu --vae-on-cpu` mitigations = **~131 s/image** (first run; clean,
+  no distortion — the RDNA3 Vulkan artefact bug does *not* hit the 780M). Bandwidth-bound
+  (DDR5-5600 ~90 GB/s), not compute-bound. To go faster once you trust the output:
+  drop `--clip-on-cpu --vae-on-cpu`, lower to 512×512, or fewer steps. FLUX.1-schnell
+  is heavier still (12B) — expect multiple minutes.
 - **GPU memory is shared with LXC 102.** Both draw from the same ~55 GB pool
   (16 GB UMA + 39 GB GTT). Running a 30B LLM *and* FLUX resident at once can
   exhaust it → OOM. Don't gen + infer heavy simultaneously, or unload one
