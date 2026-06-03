@@ -1,0 +1,56 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+# Most values default sensibly (see variables.tf) — only the credentials and
+# SSH key are required.
+
+# --- Proxmox connection (same values as ../terraform.tfvars) ---
+proxmox_api_token_id     = "root@pam!terraform"
+proxmox_api_token_secret = "changeme"
+proxmox_password         = "changeme"
+# proxmox_host           = "10.0.10.10"
+# proxmox_node           = "pve"
+
+# --- SSH key injected into the container root account ---
+ssh_public_key = "ssh-ed25519 AAAA... you@host"
+
+# --- Container (defaults shown; override only if needed) ---
+# ct_id        = 103
+# ct_hostname  = "image-gen"
+# ct_ip        = "10.0.10.78"      # reserve on the UDM-SE to avoid drift
+# ct_cores     = 8
+# ct_memory_mb = 24576
+# ct_disk_gb   = 80
+
+# --- Service ---
+# sd_port         = 7860
+# sd_default_mode = "single"        # "single" (SDXL-Turbo) | "flux" (FLUX.1-schnell)
+# build_frontend  = false           # true = build the web UI (needs Node 20 + pnpm)
+
+# Default extra flags mitigate AMD RDNA3 Vulkan distortion + VAE OOM.
+# Once you confirm clean output, drop --clip-on-cpu/--vae-on-cpu for more speed:
+# sd_extra_flags = "--diffusion-fa --vae-tiling"
+
+# --- Models -----------------------------------------------------------------
+# Default `models` (variables.tf) pulls SDXL-Turbo + the FLUX.1-schnell set
+# (~22 GB, all open / no HF auth). To customize, override the whole list.
+#
+# Add SD 3.5 Medium (GATED — needs a HF token; not curl-friendly):
+#   https://huggingface.co/stabilityai/stable-diffusion-3.5-medium
+#
+# Add FLUX.2-klein (open, Apache-2.0, ~9B — uses the same FLUX encoders):
+# models = [
+#   { file = "sd_xl_turbo_1.0_fp16.safetensors",
+#     url  = "https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/sd_xl_turbo_1.0_fp16.safetensors" },
+#   { file = "flux-2-klein-9b-Q5_K_M.gguf",
+#     url  = "https://huggingface.co/leejet/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-Q5_K_M.gguf" },
+#   { file = "ae.safetensors",
+#     url  = "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors" },
+#   { file = "clip_l.safetensors",
+#     url  = "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors" },
+#   { file = "t5xxl_fp8_e4m3fn.safetensors",
+#     url  = "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors" },
+# ]
+# # then point flux mode at the klein file:
+# flux_diffusion_file = "flux-2-klein-9b-Q5_K_M.gguf"
+
+# Lightweight fallback (fast, older quality):
+#   SD 1.5: https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors

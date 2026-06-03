@@ -1,0 +1,66 @@
+# Image generation — stable-diffusion.cpp Vulkan server running OUTSIDE the
+# cluster on Proxmox LXC 103 (image-gen at 10.0.10.78:7860). Provisioned by the
+# `03-image-gen` Terraform stage. Same off-cluster pattern as llm.yaml: a
+# selector-less Service + hand-maintained EndpointSlice pointing at the LXC IP,
+# backing an HTTPRoute through the Cilium/Envoy gateway.
+#
+# LAN-only on purpose — image generation has no auth and is not for the public
+# internet (no Cloudflare Tunnel route, unlike chat.0dl.me). Reach it at
+# img.home.0dl.me, or wire the A1111-compatible API (/sdapi/v1) into Open WebUI.
+#
+# If LXC IP changes (DHCP renewal), update the EndpointSlice addresses field.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: image-gen
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+---
+# Selector-less Service: routes to the EndpointSlice below, not a Pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: image-gen
+  namespace: image-gen
+  labels: {app: image-gen}
+spec:
+  type: ClusterIP
+  ports:
+    - {name: http, port: 7860, targetPort: 7860, protocol: TCP}
+---
+# Manual EndpointSlice pointing at the off-cluster LXC. The label
+# `kubernetes.io/service-name: image-gen` binds it to the Service above.
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: image-gen-lxc-103
+  namespace: image-gen
+  labels:
+    kubernetes.io/service-name: image-gen
+    app: image-gen
+addressType: IPv4
+ports:
+  - {name: http, port: 7860, protocol: TCP}
+endpoints:
+  - addresses: ["10.0.10.78"]
+    conditions: {ready: true}
+---
+# LAN route — TLS terminated at the gateway via the *.home.0dl.me wildcard.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: image-gen
+  namespace: image-gen
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+  hostnames:
+    - img.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: image-gen
+          port: 7860
