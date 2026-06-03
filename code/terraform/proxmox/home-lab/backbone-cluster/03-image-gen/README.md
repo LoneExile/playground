@@ -3,7 +3,8 @@
 Terraform stage that stands up a privileged Debian 13 LXC (`103`, `image-gen`)
 on `pve`, passes the **Radeon 780M iGPU** through via `/dev/dri` bind-mount,
 builds [`stable-diffusion.cpp`](https://github.com/leejet/stable-diffusion.cpp)
-with the **Vulkan** backend, and runs `sd-server` as a systemd service.
+with the **Vulkan** backend, and runs **`sd-swap`** — a small model-swapping
+proxy — in front of `sd-server` as a systemd service.
 
 Same hardware path as the LLM stack in
 [`notes/local-llm-radeon-780m.md`](../notes/local-llm-radeon-780m.md): Mesa RADV
@@ -17,7 +18,7 @@ the llama-swap LXC (102).
 |---|---|
 | `stable-diffusion.cpp` + Vulkan | Same ggml/Vulkan/RADV runtime as your llama.cpp stack. No ROCm, no PyTorch, single binary. |
 | Privileged LXC + `/dev/dri` | The only path that works on Phoenix iGPU. Provider wires the cgroup + dev nodes via `device_passthrough`. |
-| `sd-server` systemd service | One model resident; A1111-compatible API so Open WebUI can use it. |
+| `sd-swap` proxy + `sd-server` | iGPU holds one model at a time; `sd-swap` exposes ALL models on the A1111 API and hot-swaps the single backend on demand (like llama-swap, for diffusion). |
 | CLIP/VAE on CPU + VAE tiling (default) | Mitigates documented AMD RDNA3 Vulkan output distortion (issues #563/#1279) and VAE alloc failures (#1290). |
 
 ## What gets deployed
@@ -26,7 +27,8 @@ the llama-swap LXC (102).
 - `/dev/dri/card0` + `/dev/dri/renderD128` passed through
 - `stable-diffusion.cpp` built at `/opt/sd-cpp/src/build/bin/sd-server`
 - Models in `/opt/sd-cpp/models/` (default: **SDXL-Turbo** + **FLUX.1-schnell** set, ~22 GB, no HF auth)
-- `sd-server` on `:7860` — API root `/`, A1111 compat `/sdapi/v1`
+- `sd-swap` proxy on `:7860` (A1111 API); runs one `sd-server` backend on `:17860`, swapping models on demand
+- `model_registry` (variables.tf) lists every model the proxy serves — each `title` shows up in Open WebUI's image dropdown
 
 ## Usage
 
@@ -42,7 +44,7 @@ model download — **the first apply is slow**: compiling sd.cpp + pulling ~22 G
 Watch progress:
 
 ```bash
-ssh root@10.0.10.10 -- pct exec 103 -- journalctl -u sd-server -f
+ssh root@10.0.10.10 -- pct exec 103 -- journalctl -u sd-swap -f
 ```
 
 ### Generate
@@ -63,12 +65,20 @@ curl -s http://10.0.10.78:7860/sdapi/v1/txt2img \
 > the [server README](https://github.com/leejet/stable-diffusion.cpp/tree/master/examples/server)
 > (native API lives under `/sdcpp/v1`, plus `/v1` and `/sdapi/v1` compat shims).
 
-### Switch models live
+### Select / switch the image model
 
-```bash
-pct exec 103 -- sd-switch flux      # -> FLUX.1-schnell (higher quality, slower)
-pct exec 103 -- sd-switch single    # -> SDXL-Turbo (fast)
-```
+Both models are visible everywhere. Pick one of three ways:
+
+- **Open WebUI**: Admin → Settings → Images → **Default Model** dropdown lists
+  every registry model. (No per-message picker — the chat-model dropdown is LLMs
+  only.)
+- **API**: `POST /sdapi/v1/options {"sd_model_checkpoint":"flux1-schnell"}`, then generate.
+- **CLI**: `pct exec 103 -- sd-switch flux1-schnell` (or `sd-switch list` / `sd-switch` for status).
+
+`sd-swap` cold-loads the chosen model on the **next** generation (~30–90 s SDXL,
+longer for FLUX); generations with the same model after that are fast. The
+backend unloads after `sdswap_ttl` idle seconds to free the iGPU. Add models in
+`model_registry` (variables.tf) + their files in `models`.
 
 ### Wire into your existing Open WebUI (LXC 102)
 

@@ -1103,10 +1103,15 @@ passthrough). Provisioned by the `03-image-gen` Terraform stage (sibling of
 this LLM stack). Both LXCs share the same ~55 GB iGPU memory pool, so **don't
 keep a big LLM and a diffusion model resident at once** — VRAM+GTT will exhaust.
 
-- Backend: `sd-server` (built `-DSD_VULKAN=ON`) on `10.0.10.78:7860`.
+- Backend: **`sd-swap`** (a stdlib model-swapping proxy, like llama-swap but for
+  diffusion) on `10.0.10.78:7860`, in front of one `sd-server` (`-DSD_VULKAN=ON`)
+  backend on loopback `:17860`. The iGPU holds one diffusion model at a time;
+  sd-swap lists them all and cold-swaps the backend on demand.
 - API: A1111-compatible at `/sdapi/v1` (plus native `/sdcpp/v1`).
-- Default model: **SDXL-Turbo** (single-file, 1–4 steps, cfg 1.0). FLUX.1-schnell
-  also pulled; switch live with `pct exec 103 -- sd-switch flux`.
+- Models: **SDXL-Turbo** (default, 1–4 steps, cfg 1.0) + **FLUX.1-schnell**, both
+  shown in Open WebUI's image-model dropdown. Select via OWUI Admin → Images, the
+  A1111 `/sdapi/v1/options` call, or `pct exec 103 -- sd-switch <title>`. Measured
+  on the 780M: SDXL-Turbo ~51 s, FLUX.1-schnell ~80 s at 512² (incl. cold swap).
 - Gateway: `img.home.0dl.me` (LAN-only — `02-helm-stack/manifests/image-gen.yaml`).
 - Mitigations on by default: `--clip-on-cpu --vae-on-cpu --vae-tiling --diffusion-fa`.
   Output on the 780M (gfx1103) is **clean** — the RDNA3 Vulkan distortion bug

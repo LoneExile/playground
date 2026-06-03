@@ -151,15 +151,28 @@ variable "sd_port" {
   default     = 7860
 }
 
-variable "sd_default_mode" {
-  description = "Which model the service runs at boot: 'single' (one-file checkpoint, e.g. SDXL-Turbo) or 'flux' (multi-file FLUX.1-schnell). Switch live with `sd-switch single|flux`."
-  type        = string
-  default     = "single"
+variable "sdswap_backend_port" {
+  description = "Internal port the sd-swap proxy runs the sd-server backend on (loopback only)"
+  type        = number
+  default     = 17860
+}
 
-  validation {
-    condition     = contains(["single", "flux"], var.sd_default_mode)
-    error_message = "sd_default_mode must be 'single' or 'flux'."
-  }
+variable "sdswap_ttl" {
+  description = "Idle seconds before sd-swap unloads the backend to free iGPU memory. 0 = never unload."
+  type        = number
+  default     = 1800
+}
+
+variable "sdswap_load_timeout" {
+  description = "Seconds sd-swap waits for a backend model to become healthy after a (cold) swap. FLUX is slow to load — keep generous."
+  type        = number
+  default     = 600
+}
+
+variable "sdswap_gen_timeout" {
+  description = "Seconds sd-swap allows a single txt2img/img2img generation to run before giving up (separate from the model-load timeout)."
+  type        = number
+  default     = 1800
 }
 
 variable "sd_extra_flags" {
@@ -187,35 +200,54 @@ variable "build_frontend" {
   default     = false
 }
 
-# Filenames the service points at (must match basenames in `models` below).
-variable "single_model_file" {
-  description = "Single-file checkpoint for 'single' mode"
-  type        = string
-  default     = "sd_xl_turbo_1.0_fp16.safetensors"
-}
+# Model registry the sd-swap proxy serves. Each `title` shows up in Open WebUI's
+# image-model dropdown (Admin -> Settings -> Images). Filenames are relative to
+# the models dir. `mode` is "single" (one-file checkpoint) or "flux" (multi-file).
+# Titles must correspond to files pulled by `models` above.
+variable "model_registry" {
+  description = "Image models the proxy exposes + how to launch each"
+  type = list(object({
+    title           = string
+    mode            = string
+    model           = optional(string) # mode=single
+    diffusion_model = optional(string) # mode=flux
+    vae             = optional(string) # mode=flux
+    clip_l          = optional(string) # mode=flux
+    t5xxl           = optional(string) # mode=flux
+  }))
+  default = [
+    {
+      title = "sd_xl_turbo_1.0_fp16"
+      mode  = "single"
+      model = "sd_xl_turbo_1.0_fp16.safetensors"
+    },
+    {
+      title           = "flux1-schnell"
+      mode            = "flux"
+      diffusion_model = "flux1-schnell-Q4_1.gguf"
+      vae             = "ae.safetensors"
+      clip_l          = "clip_l.safetensors"
+      t5xxl           = "t5xxl_fp8_e4m3fn.safetensors"
+    },
+  ]
 
-variable "flux_diffusion_file" {
-  description = "FLUX diffusion GGUF for 'flux' mode"
-  type        = string
-  default     = "flux1-schnell-Q4_1.gguf"
-}
-
-variable "flux_vae_file" {
-  description = "FLUX VAE"
-  type        = string
-  default     = "ae.safetensors"
-}
-
-variable "flux_clip_l_file" {
-  description = "FLUX CLIP-L encoder"
-  type        = string
-  default     = "clip_l.safetensors"
-}
-
-variable "flux_t5xxl_file" {
-  description = "FLUX T5-XXL encoder"
-  type        = string
-  default     = "t5xxl_fp8_e4m3fn.safetensors"
+  validation {
+    condition     = alltrue([for m in var.model_registry : contains(["single", "flux"], m.mode)])
+    error_message = "Each model_registry[*].mode must be 'single' or 'flux'."
+  }
+  validation {
+    condition     = length(distinct([for m in var.model_registry : m.title])) == length(var.model_registry)
+    error_message = "model_registry titles must be unique (they key the proxy's model map)."
+  }
+  validation {
+    condition = alltrue([
+      for m in var.model_registry :
+      m.mode == "single" ? m.model != null : (
+        m.diffusion_model != null && m.vae != null && m.clip_l != null && m.t5xxl != null
+      )
+    ])
+    error_message = "single needs `model`; flux needs `diffusion_model`, `vae`, `clip_l`, `t5xxl`."
+  }
 }
 
 # Models to download into /opt/sd-cpp/models. All defaults are open (no HF auth).

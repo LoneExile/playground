@@ -30,6 +30,7 @@ provider "proxmox" {
 }
 
 locals {
+  sd_dir     = "/opt/sd-cpp"
   models_dir = "/opt/sd-cpp/models"
 
   # Connection to the PVE host for pct push/exec (the provisioning path).
@@ -40,18 +41,20 @@ locals {
     password = var.proxmox_password
   }
 
-  # Rendered once, used for both the file provisioner and the re-provision
-  # trigger hash (so the hash can never drift from what's actually written).
-  server_env_content = templatefile("${path.module}/templates/server.env.tftpl", {
-    port                = var.sd_port
-    mode                = var.sd_default_mode
-    models_dir          = local.models_dir
-    single_model_file   = var.single_model_file
-    flux_diffusion_file = var.flux_diffusion_file
-    flux_vae_file       = var.flux_vae_file
-    flux_clip_l_file    = var.flux_clip_l_file
-    flux_t5xxl_file     = var.flux_t5xxl_file
-    extra_flags         = var.sd_extra_flags
+  # The sd-swap model registry, as JSON the proxy reads at /opt/sd-cpp/models.json.
+  models_json = jsonencode(var.model_registry)
+
+  # sd-swap env, rendered once; reused for the file provisioner AND the
+  # re-provision trigger hash (so the hash can't drift from what's written).
+  sdswap_env_content = templatefile("${path.module}/templates/sd-swap.env.tftpl", {
+    port         = var.sd_port
+    backend_port = var.sdswap_backend_port
+    sd_dir       = local.sd_dir
+    models_dir   = local.models_dir
+    extra_flags  = var.sd_extra_flags
+    ttl          = var.sdswap_ttl
+    load_timeout = var.sdswap_load_timeout
+    gen_timeout  = var.sdswap_gen_timeout
   })
 }
 
@@ -160,10 +163,11 @@ resource "null_resource" "provision_sd" {
   triggers = {
     container_id  = proxmox_virtual_environment_container.image_gen.id
     provision_sha = filesha256("${path.module}/scripts/provision-sd.sh")
-    runserver_sha = filesha256("${path.module}/scripts/run-server.sh")
+    sdswap_sha    = filesha256("${path.module}/scripts/sd-swap.py")
     switch_sha    = filesha256("${path.module}/scripts/sd-switch.sh")
     models        = sha256(jsonencode(var.models))
-    server_env    = sha256(local.server_env_content)
+    registry      = sha256(local.models_json)
+    sdswap_env    = sha256(local.sdswap_env_content)
     frontend      = tostring(var.build_frontend)
     build_jobs    = tostring(var.build_jobs)
   }
@@ -180,10 +184,10 @@ resource "null_resource" "provision_sd" {
     }
   }
 
-  # 2. server launcher (static)
+  # 2. sd-swap proxy (static)
   provisioner "file" {
-    content     = file("${path.module}/scripts/run-server.sh")
-    destination = "/tmp/sd-run-server-${var.ct_id}.sh"
+    content     = file("${path.module}/scripts/sd-swap.py")
+    destination = "/tmp/sd-swap-${var.ct_id}.py"
     connection {
       type     = local.host_conn.type
       host     = local.host_conn.host
@@ -204,10 +208,10 @@ resource "null_resource" "provision_sd" {
     }
   }
 
-  # 4. server.env (rendered)
+  # 4. model registry (rendered JSON the proxy reads)
   provisioner "file" {
-    content     = local.server_env_content
-    destination = "/tmp/sd-server-${var.ct_id}.env"
+    content     = local.models_json
+    destination = "/tmp/sd-models-${var.ct_id}.json"
     connection {
       type     = local.host_conn.type
       host     = local.host_conn.host
@@ -216,7 +220,7 @@ resource "null_resource" "provision_sd" {
     }
   }
 
-  # 5. models manifest (rendered, tab-separated)
+  # 5. models download manifest (rendered, tab-separated)
   provisioner "file" {
     content = templatefile("${path.module}/templates/models.tsv.tftpl", {
       models = var.models
@@ -230,7 +234,19 @@ resource "null_resource" "provision_sd" {
     }
   }
 
-  # 6. push everything into the CT and run the installer
+  # 6. sd-swap env (rendered)
+  provisioner "file" {
+    content     = local.sdswap_env_content
+    destination = "/tmp/sd-swap-${var.ct_id}.env"
+    connection {
+      type     = local.host_conn.type
+      host     = local.host_conn.host
+      user     = local.host_conn.user
+      password = local.host_conn.password
+    }
+  }
+
+  # 7. push everything into the CT and run the installer
   provisioner "remote-exec" {
     inline = [
       "set -e",
@@ -239,10 +255,11 @@ resource "null_resource" "provision_sd" {
       "for i in $(seq 1 60); do pct exec ${var.ct_id} -- true 2>/dev/null && break; echo 'waiting for CT ${var.ct_id}...'; sleep 2; done",
       "pct exec ${var.ct_id} -- systemctl is-system-running --wait >/dev/null 2>&1 || true",
       "pct push ${var.ct_id} /tmp/sd-provision-${var.ct_id}.sh /root/provision-sd.sh --perms 0755",
-      "pct push ${var.ct_id} /tmp/sd-run-server-${var.ct_id}.sh /root/run-server.sh --perms 0755",
+      "pct push ${var.ct_id} /tmp/sd-swap-${var.ct_id}.py /root/sd-swap.py --perms 0755",
       "pct push ${var.ct_id} /tmp/sd-switch-${var.ct_id}.sh /root/sd-switch.sh --perms 0755",
-      "pct push ${var.ct_id} /tmp/sd-server-${var.ct_id}.env /root/server.env",
+      "pct push ${var.ct_id} /tmp/sd-models-${var.ct_id}.json /root/models.json",
       "pct push ${var.ct_id} /tmp/sd-models-${var.ct_id}.tsv /root/sd-models.tsv",
+      "pct push ${var.ct_id} /tmp/sd-swap-${var.ct_id}.env /root/sd-swap.env",
       "pct exec ${var.ct_id} -- env BUILD_FRONTEND=${var.build_frontend} BUILD_JOBS=${var.build_jobs} bash /root/provision-sd.sh",
     ]
     connection {

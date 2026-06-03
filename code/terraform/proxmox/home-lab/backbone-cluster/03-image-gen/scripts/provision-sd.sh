@@ -38,7 +38,7 @@ apt-get update -qq
 apt-get install -y -qq \
   build-essential cmake git pkg-config ca-certificates curl \
   mesa-vulkan-drivers libvulkan1 libvulkan-dev vulkan-tools \
-  spirv-headers libgomp1
+  spirv-headers libgomp1 python3
 # shader compiler — package name differs across releases; try both. Don't mask
 # total absence: warn loudly so a build failure later is easy to trace.
 apt-get install -y -qq glslc || apt-get install -y -qq glslang-tools || \
@@ -131,48 +131,63 @@ if [ -f /root/sd-models.tsv ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Install launcher, switcher, env
+# 5. Install the sd-swap proxy, model registry, switcher, env
 # ---------------------------------------------------------------------------
-install -m 0755 /root/run-server.sh "$SD_DIR/run-server.sh"
+install -m 0755 /root/sd-swap.py "$SD_DIR/sd-swap.py"
 install -m 0755 /root/sd-switch.sh /usr/local/bin/sd-switch
-install -m 0644 /root/server.env "$SD_DIR/server.env"
+install -m 0644 /root/models.json "$SD_DIR/models.json"
+install -m 0644 /root/sd-swap.env "$SD_DIR/sd-swap.env"
+
+# Pull the two ports out of the env file WITHOUT sourcing it — SDSWAP_EXTRA_FLAGS
+# holds space-separated flags that a bash `source` would try to execute.
+SDSWAP_PORT=$(grep -E '^SDSWAP_PORT=' "$SD_DIR/sd-swap.env" | cut -d= -f2)
+SDSWAP_BACKEND_PORT=$(grep -E '^SDSWAP_BACKEND_PORT=' "$SD_DIR/sd-swap.env" | cut -d= -f2)
+SDSWAP_PORT=${SDSWAP_PORT:-7860}
+SDSWAP_BACKEND_PORT=${SDSWAP_BACKEND_PORT:-17860}
 
 # ---------------------------------------------------------------------------
-# 6. systemd service
+# 6. systemd service — sd-swap (replaces the old direct sd-server unit)
 # ---------------------------------------------------------------------------
-cat > /etc/systemd/system/sd-server.service <<'UNIT'
+# Retire the pre-proxy unit if an earlier apply installed it.
+if systemctl list-unit-files 2>/dev/null | grep -q '^sd-server\.service'; then
+  log "removing legacy sd-server.service (superseded by sd-swap)"
+  systemctl disable --now sd-server.service 2>/dev/null || true
+  rm -f /etc/systemd/system/sd-server.service
+fi
+
+cat > /etc/systemd/system/sd-swap.service <<UNIT
 [Unit]
-Description=stable-diffusion.cpp Vulkan server (image generation)
+Description=sd-swap proxy (model-swapping front end for stable-diffusion.cpp)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/sd-cpp
-ExecStart=/opt/sd-cpp/run-server.sh
+WorkingDirectory=$SD_DIR
+EnvironmentFile=$SD_DIR/sd-swap.env
+# Reap an orphaned backend from a previous proxy crash before (re)starting.
+ExecStartPre=-/usr/bin/pkill -f "sd-server --listen-ip 127.0.0.1 --listen-port $SDSWAP_BACKEND_PORT"
+ExecStart=/usr/bin/python3 $SD_DIR/sd-swap.py
 Restart=on-failure
 RestartSec=5
-# model load + first generation are slow on the iGPU; never time out the start
 TimeoutStartSec=0
 
 [Install]
 WantedBy=multi-user.target
 UNIT
 
-log "enabling sd-server"
+log "enabling sd-swap"
 systemctl daemon-reload
-systemctl enable --now sd-server
+systemctl enable --now sd-swap
 
 # ---------------------------------------------------------------------------
-# 7. Smoke check (non-fatal — model load can lag behind service start)
+# 7. Smoke check — the proxy lists the full model registry (no backend loaded yet)
 # ---------------------------------------------------------------------------
-# shellcheck disable=SC1091
-. "$SD_DIR/server.env" || true
-sleep 5
-systemctl --no-pager --full status sd-server | head -12 || true
-if ss -ltn 2>/dev/null | grep -q ":${SD_PORT:-7860}"; then
-  log "sd-server listening on :${SD_PORT:-7860}"
+sleep 3
+systemctl --no-pager --full status sd-swap | head -12 || true
+if curl -fsS "http://127.0.0.1:${SDSWAP_PORT}/sdapi/v1/sd-models" > /tmp/sdmodels.json 2>/dev/null; then
+  log "sd-swap up; models: $(python3 -c 'import json;print([m["title"] for m in json.load(open("/tmp/sdmodels.json"))])')"
 else
-  log "sd-server not yet listening on :${SD_PORT:-7860} (model may still be loading — check journalctl -u sd-server)"
+  log "sd-swap not answering on :${SDSWAP_PORT} yet (check journalctl -u sd-swap)"
 fi
 log "done."

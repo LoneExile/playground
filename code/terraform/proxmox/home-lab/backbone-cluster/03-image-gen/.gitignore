@@ -9,3 +9,7 @@ crash.log
 terraform.tfvars
 backend.tfvars
 *.auto.tfvars
+
+# Python
+__pycache__/
+*.pyc

@@ -21,36 +21,40 @@ ssh_public_key = "ssh-ed25519 AAAA... you@host"
 # ct_disk_gb   = 80
 
 # --- Service ---
-# sd_port         = 7860
-# sd_default_mode = "single"        # "single" (SDXL-Turbo) | "flux" (FLUX.1-schnell)
-# build_frontend  = false           # true = build the web UI (needs Node 20 + pnpm)
+# sd_port        = 7860             # the sd-swap proxy listens here
+# build_frontend = false            # true = build sd.cpp's web UI (needs Node 20 + pnpm)
+# sdswap_ttl     = 1800             # idle seconds before the backend unloads (frees iGPU mem)
 
 # Default extra flags mitigate AMD RDNA3 Vulkan distortion + VAE OOM.
 # Once you confirm clean output, drop --clip-on-cpu/--vae-on-cpu for more speed:
 # sd_extra_flags = "--diffusion-fa --vae-tiling"
 
 # --- Models -----------------------------------------------------------------
-# Default `models` (variables.tf) pulls SDXL-Turbo + the FLUX.1-schnell set
-# (~22 GB, all open / no HF auth). To customize, override the whole list.
+# TWO lists work together:
+#  1. `models`         — what to DOWNLOAD ({file,url}); all defaults are open/no-auth.
+#  2. `model_registry` — what the sd-swap proxy SERVES (each `title` appears in
+#                        Open WebUI's image-model dropdown). Titles reference the
+#                        downloaded files.
 #
-# Add SD 3.5 Medium (GATED — needs a HF token; not curl-friendly):
-#   https://huggingface.co/stabilityai/stable-diffusion-3.5-medium
+# Defaults pull + serve SDXL-Turbo + FLUX.1-schnell (~22 GB). To add a model,
+# add its files to `models` AND a registry entry. Example — add FLUX.2-klein
+# (open, Apache-2.0, ~9B; reuses the FLUX encoders):
 #
-# Add FLUX.2-klein (open, Apache-2.0, ~9B — uses the same FLUX encoders):
 # models = [
-#   { file = "sd_xl_turbo_1.0_fp16.safetensors",
-#     url  = "https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/sd_xl_turbo_1.0_fp16.safetensors" },
-#   { file = "flux-2-klein-9b-Q5_K_M.gguf",
-#     url  = "https://huggingface.co/leejet/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-Q5_K_M.gguf" },
-#   { file = "ae.safetensors",
-#     url  = "https://huggingface.co/second-state/FLUX.1-schnell-GGUF/resolve/main/ae.safetensors" },
-#   { file = "clip_l.safetensors",
-#     url  = "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors" },
-#   { file = "t5xxl_fp8_e4m3fn.safetensors",
-#     url  = "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors" },
+#   { file = "sd_xl_turbo_1.0_fp16.safetensors", url = "https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/sd_xl_turbo_1.0_fp16.safetensors" },
+#   { file = "flux1-schnell-Q4_1.gguf",          url = "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q4_1.gguf" },
+#   { file = "flux-2-klein-9b-Q5_K_M.gguf",       url = "https://huggingface.co/leejet/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-Q5_K_M.gguf" },
+#   { file = "ae.safetensors",                   url = "https://huggingface.co/second-state/FLUX.1-schnell-GGUF/resolve/main/ae.safetensors" },
+#   { file = "clip_l.safetensors",               url = "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors" },
+#   { file = "t5xxl_fp8_e4m3fn.safetensors",     url = "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors" },
 # ]
-# # then point flux mode at the klein file:
-# flux_diffusion_file = "flux-2-klein-9b-Q5_K_M.gguf"
-
-# Lightweight fallback (fast, older quality):
-#   SD 1.5: https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors
+# model_registry = [
+#   { title = "sd_xl_turbo_1.0_fp16", mode = "single", model = "sd_xl_turbo_1.0_fp16.safetensors" },
+#   { title = "flux1-schnell",  mode = "flux", diffusion_model = "flux1-schnell-Q4_1.gguf",   vae = "ae.safetensors", clip_l = "clip_l.safetensors", t5xxl = "t5xxl_fp8_e4m3fn.safetensors" },
+#   { title = "flux2-klein-9b", mode = "flux", diffusion_model = "flux-2-klein-9b-Q5_K_M.gguf", vae = "ae.safetensors", clip_l = "clip_l.safetensors", t5xxl = "t5xxl_fp8_e4m3fn.safetensors" },
+# ]
+#
+# SD 3.5 Medium is GATED (needs a HF token; not curl-friendly):
+#   https://huggingface.co/stabilityai/stable-diffusion-3.5-medium
+# SD 1.5 fallback (open):
+#   https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors
