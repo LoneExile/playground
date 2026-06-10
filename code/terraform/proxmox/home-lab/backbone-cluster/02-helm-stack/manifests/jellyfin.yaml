@@ -81,7 +81,7 @@ spec:
         accelerator: intel-quicksync
       containers:
         - name: jellyfin
-          image: jellyfin/jellyfin:10.11.8
+          image: jellyfin/jellyfin:10.11.11
           ports:
             - {name: http, containerPort: 8096}
           env:
