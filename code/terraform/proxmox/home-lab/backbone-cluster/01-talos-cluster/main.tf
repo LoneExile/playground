@@ -220,6 +220,16 @@ resource "talos_machine_configuration_apply" "node" {
           image = local.talos_installer_image
           wipe  = true
         }
+        # The zfs + drbd extensions ship the kernel modules but Talos does NOT
+        # auto-load them. Without this, ext-zfs-service blocks on /dev/zfs and the
+        # node hangs in "booting" (startAllServices never completes) — same failure
+        # class as the bird2 config-file requirement above.
+        kernel = {
+          modules = [
+            { name = "zfs" },
+            { name = "drbd" },
+          ]
+        }
         network = {
           hostname = each.key
           interfaces = [
@@ -504,6 +514,14 @@ resource "talos_machine_configuration_apply" "worker" {
           image = local.talos_installer_image_worker
           wipe  = true
         }
+        # See controlplane note: zfs + drbd modules must be loaded explicitly or
+        # ext-zfs-service hangs the boot waiting for /dev/zfs.
+        kernel = {
+          modules = [
+            { name = "zfs" },
+            { name = "drbd" },
+          ]
+        }
         network = {
           hostname = each.key
           interfaces = [
@@ -537,6 +555,101 @@ resource "talos_machine_configuration_apply" "worker" {
           # Worker machineconfig doesn't inherit cluster.network.serviceSubnets
           # like controlplane does, so clusterDNS defaults to 10.96.0.10 —
           # wrong for our 100.125.0.0/16 service CIDR. Set it explicitly.
+          clusterDNS = ["100.125.0.10"]
+          extraConfig = {
+            maxPods = 512
+          }
+        }
+        sysctls = {
+          "net.ipv4.neigh.default.gc_thresh1" = "4096"
+          "net.ipv4.neigh.default.gc_thresh2" = "8192"
+          "net.ipv4.neigh.default.gc_thresh3" = "16384"
+        }
+      }
+    })
+  ]
+}
+
+# =============================================================================
+# 12. Raspberry Pi 4 worker (physical, arm64) — NOT a Proxmox VM
+# =============================================================================
+# Booted from a factory SBC image (rpi_generic overlay) flashed to a USB SSD.
+# Joins the existing cluster over the maintenance API; no new bootstrap.
+# Schematic 7eced002… = binfmt-misc, bird2, nfs-utils, nfsd, nfsrahead PLUS the
+# siderolabs/sbc-raspberrypi overlay (rpi_generic). No zfs/drbd (RAM-limited),
+# no x86 ucode/NIC firmware. Disk is the USB SSD (/dev/sda), NIC is end0.
+locals {
+  pi_worker_installer = "factory.talos.dev/metal-installer/7eced002b21eec49a420a36a4c31df7a4552cacc5052f2edfc8887e5e0da98d4:v1.13.4"
+}
+
+resource "talos_machine_configuration_apply" "pi_worker" {
+  # No depends_on the bootstrap: the cluster is already running, so this worker
+  # just joins. Avoids dragging the whole CP/VM/ISO chain into a -target apply.
+  client_configuration = talos_machine_secrets.this.client_configuration
+  machine_configuration_input = data.talos_machine_configuration.worker.machine_configuration
+
+  # node = the Pi's static IP (set in the patch below). The very first apply used
+  # a temporary `endpoint` pointing at the Pi's DHCP/maintenance IP (10.0.10.51);
+  # now that it's configured it answers on the static IP, so no override is needed.
+  # If you ever re-flash, add a UniFi DHCP reservation (MAC e4:5f:01:f4:c9:e3 ->
+  # 10.0.10.206) so maintenance and static IPs match, then re-apply.
+  node = "10.0.10.206"
+
+  config_patches = [
+    # bird2 needs a config file or startAllServices hangs (~1h10m) — same as the
+    # other nodes. The Pi schematic ships the bird2 extension.
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "ExtensionServiceConfig"
+      name       = "bird2"
+      configFiles = [{
+        content   = <<-BIRD
+          log syslog all;
+          router id 0.0.0.1;
+          protocol device {}
+          protocol direct { disabled; }
+          protocol kernel kernel4 {
+            ipv4 { export none; import none; };
+            disabled;
+          }
+        BIRD
+        mountPath = "/usr/local/etc/bird.conf"
+      }]
+    }),
+    yamlencode({
+      machine = {
+        install = {
+          disk  = "/dev/sda" # USB SSD (no SD card present)
+          image = local.pi_worker_installer
+          # no wipe — the SBC image is already on this disk
+        }
+        # NOTE: no kernel.modules here — the Pi schematic has no zfs/drbd.
+        network = {
+          hostname = "bb-worker-02"
+          interfaces = [
+            {
+              interface = "end0" # Pi NIC (not ens18)
+              addresses = ["10.0.10.206/${var.network_prefix}"]
+              routes = [
+                {
+                  network = "0.0.0.0/0"
+                  gateway = var.gateway
+                }
+              ]
+            }
+          ]
+          nameservers = var.nameservers
+        }
+        features = {
+          kubePrism = {
+            enabled = true
+            port    = 7445
+          }
+        }
+        kubelet = {
+          nodeIP = {
+            validSubnets = ["${local.subnet_base}.0/24"]
+          }
           clusterDNS = ["100.125.0.10"]
           extraConfig = {
             maxPods = 512

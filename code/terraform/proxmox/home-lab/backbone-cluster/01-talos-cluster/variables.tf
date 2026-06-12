@@ -44,7 +44,7 @@ variable "cluster_name" {
 variable "talos_version" {
   description = "Talos OS version"
   type        = string
-  default     = "v1.12.6"
+  default     = "v1.13.4"
 }
 
 variable "kubernetes_version" {
@@ -54,16 +54,16 @@ variable "kubernetes_version" {
 }
 
 variable "talos_schematic_id" {
-  description = "Talos Image Factory schematic ID (single schematic for all nodes; per-node IPs come from machineconfig)"
+  description = "Talos Image Factory schematic ID (single schematic for all nodes; per-node IPs come from machineconfig). Extensions: amazon-ena, amd-ucode, amdgpu, binfmt-misc, bird2, bnx2-bnx2x, btrfs, drbd, intel-ice-firmware, intel-ucode, nfs-utils, nfsd, nfsrahead, qlogic-firmware, zfs"
   type        = string
-  default     = "19b1e20f9a26f178d836505229c1fdbad0347f145a440af17044c2f113c65870"
+  default     = "d0d6faa0e0c33f9953065bb820a97c4d7e7d3fc208efdcd2aef41da5e87de2cb"
 }
 
-# Separate schematic for workers that need Intel-specific extensions (i915, intel-ucode).
+# Separate schematic for workers — same as controlplane plus i915 (Intel iGPU passthrough on the NAS host).
 variable "worker_schematic_id" {
-  description = "Talos Image Factory schematic ID used by worker nodes"
+  description = "Talos Image Factory schematic ID used by worker nodes (controlplane set + i915)"
   type        = string
-  default     = "d5ca60beb17607256bf0986594c0040077c18f78f4b12b1d90a11a3bdee8244c"
+  default     = "20811fa476a08d5f86b967fdece62903ebeb3bc26e8a65df4b4b72415642c414"
 }
 
 # --- Second Proxmox host (NAS / worker host) ---
