@@ -16,6 +16,7 @@ locals {
     jellyfin        = "${path.module}/manifests/jellyfin.yaml"
     llm             = "${path.module}/manifests/llm.yaml"
     memos           = "${path.module}/manifests/memos.yaml"
+    node_thermal    = "${path.module}/manifests/node-thermal.yaml"
     qbittorrent_qui = "${path.module}/manifests/qbittorrent-qui.yaml"
     syncthing       = "${path.module}/manifests/syncthing.yaml"
     trilium         = "${path.module}/manifests/trilium.yaml"

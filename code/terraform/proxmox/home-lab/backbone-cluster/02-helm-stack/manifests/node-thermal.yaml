@@ -1,0 +1,73 @@
+# Lightweight node thermal watcher. Pinned to arm64 nodes (the Argon ONE Pi 4
+# worker) — the amd64 VMs have no meaningful /sys/class/thermal sensor. Reads
+# thermal_zone0 on a loop and logs temp; emits a loud "THERMAL WARN/CRIT" line
+# past the thresholds so it's greppable via `kubectl logs`. No Prometheus in
+# this cluster yet, so the pod log IS the alert channel.
+#   kubectl -n monitoring logs -l app=node-thermal -f
+#   kubectl -n monitoring logs -l app=node-thermal | grep THERMAL
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    # hostPath needs a privileged PSS namespace.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/audit: privileged
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-thermal
+  namespace: monitoring
+  labels: {app: node-thermal}
+spec:
+  selector:
+    matchLabels: {app: node-thermal}
+  template:
+    metadata:
+      labels: {app: node-thermal}
+    spec:
+      # Only the Pi (arm64). VMs lack a real thermal zone.
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: thermal
+          image: busybox:1.37
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              WARN=${WARN_MILLIC:-70000}
+              CRIT=${CRIT_MILLIC:-80000}
+              echo "node-thermal watching $NODE_NAME (warn>=$((WARN/1000))C crit>=$((CRIT/1000))C every ${INTERVAL}s)"
+              while true; do
+                t=$(cat /host/thermal/temp 2>/dev/null || echo 0)
+                c=$((t/1000))
+                if   [ "$t" -ge "$CRIT" ]; then lvl="THERMAL CRIT";
+                elif [ "$t" -ge "$WARN" ]; then lvl="THERMAL WARN";
+                else lvl="thermal-ok"; fi
+                echo "$(date -u +%FT%TZ) node=$NODE_NAME temp=${c}C $lvl"
+                sleep "${INTERVAL:-30}"
+              done
+          env:
+            - name: NODE_NAME
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+            - {name: WARN_MILLIC, value: "70000"}  # 70C
+            - {name: CRIT_MILLIC, value: "80000"}  # 80C (A72 throttle point)
+            - {name: INTERVAL, value: "30"}
+          volumeMounts:
+            - {name: thermal, mountPath: /host/thermal, readOnly: true}
+          resources:
+            requests: {cpu: 1m, memory: 8Mi}
+            limits: {memory: 16Mi}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+      volumes:
+        - name: thermal
+          hostPath:
+            path: /sys/class/thermal/thermal_zone0
+            type: Directory
