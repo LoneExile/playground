@@ -116,9 +116,13 @@ spec:
           readinessProbe:
             httpGet: {path: /health, port: 8096}
             periodSeconds: 10
+            timeoutSeconds: 5         # default 1s times out under trickplay/transcode load
+            failureThreshold: 5       # don't yank from Service on a brief spike
           livenessProbe:
             httpGet: {path: /health, port: 8096}
             periodSeconds: 30
+            timeoutSeconds: 5         # default 1s times out under load -> false restart
+            failureThreshold: 5       # ~2.5min unhealthy before kill; survives load spikes
       volumes:
         - name: nas
           persistentVolumeClaim:
