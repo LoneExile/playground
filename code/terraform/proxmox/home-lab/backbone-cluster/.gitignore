@@ -9,8 +9,13 @@ terraform.tfvars
 **/terraform.tfstate*
 **/.terraform.lock.hcl
 **/backend.tfvars
+# out-of-band state pulls (bootstrap safety copies — contain secrets)
+**/*-state.backup.json
 *.tfplan
 plan.out
 01-talos-cluster/kubeconfig
 01-talos-cluster/talosconfig
 note.txt
+
+kubeconfig.*
+.env
