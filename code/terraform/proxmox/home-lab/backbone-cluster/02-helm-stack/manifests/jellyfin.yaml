@@ -94,8 +94,8 @@ spec:
             # (kubelet's default device cgroup denies DRM char devices otherwise).
             privileged: true
           resources:
-            requests: {cpu: 200m, memory: 512Mi}
-            limits:   {cpu: "4",  memory: 4Gi}
+            requests: {cpu: "1000m", memory: "2Gi"}
+            limits:   {cpu: "4000m", memory: "8Gi"}
           volumeMounts:
             - {name: nas, mountPath: /config, subPath: config/jelly/config}
             # /cache is transcode scratch + image cache — ephemeral by nature,
