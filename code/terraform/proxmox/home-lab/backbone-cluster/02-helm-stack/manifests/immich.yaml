@@ -124,6 +124,16 @@ spec:
               set -eu
               chown 999:999 /var/lib/postgresql/data
               chmod 700 /var/lib/postgresql/data
+              # Self-heal: an unclean shutdown (Pi power loss / NFS hiccup) can
+              # leave an empty/corrupt postmaster.pid behind. Postgres then
+              # refuses to start ("lock file postmaster.pid is empty") and
+              # crashloops. Safe to delete here: replicas:1 + Recreate means no
+              # live postmaster can be holding it when this initContainer runs.
+              pid=/var/lib/postgresql/data/postmaster.pid
+              if [ -f "$pid" ] && [ ! -s "$pid" ]; then
+                echo "removing stale empty postmaster.pid"
+                rm -f "$pid"
+              fi
           securityContext:
             runAsUser: 0
           volumeMounts:
