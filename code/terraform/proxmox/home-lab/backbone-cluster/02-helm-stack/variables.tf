@@ -163,6 +163,20 @@ variable "siyuan_access_auth_code" {
   sensitive   = true
 }
 
+# --- ZenNotes ---
+# Used by manifests/zennotes.yaml (rendered via templatefile in apps.tf).
+# ZenNotes is secure-by-default and refuses unauthenticated access unless
+# ZENNOTES_ALLOW_INSECURE_NOAUTH=1. This bootstrap token is injected via
+# ZENNOTES_AUTH_TOKEN; the browser is prompted for it once, then uses an
+# HttpOnly session cookie. Generate with: openssl rand -hex 32. Rotate by
+# editing terraform.tfvars and re-applying (deployment rolls; existing
+# sessions invalidate and clients re-enter the new token).
+variable "zennotes_auth_token" {
+  description = "ZENNOTES_AUTH_TOKEN bootstrap auth token. Generate with: openssl rand -hex 32. Rotate by editing terraform.tfvars and re-applying."
+  type        = string
+  sensitive   = true
+}
+
 # --- Reactive Resume ---
 # Used by manifests/reactive-resume.yaml (rendered via templatefile in apps.tf).
 # Stack is fresh on first deploy: postgres initdb creates the 'reactive_resume'

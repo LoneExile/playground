@@ -34,6 +34,9 @@ locals {
     siyuan = templatefile("${path.module}/manifests/siyuan.yaml", {
       siyuan_access_auth_code = var.siyuan_access_auth_code
     })
+    zennotes = templatefile("${path.module}/manifests/zennotes.yaml", {
+      zennotes_auth_token = var.zennotes_auth_token
+    })
     reactive_resume = templatefile("${path.module}/manifests/reactive-resume.yaml", {
       reactive_resume_db_password          = var.reactive_resume_db_password
       reactive_resume_access_token_secret  = var.reactive_resume_access_token_secret
