@@ -6,10 +6,12 @@
 # Differences vs the old Rockchip manifest:
 #   - Image: official jellyfin/jellyfin:latest (amd64) instead of
 #     nyanmisaka/jellyfin:latest-rockchip (Rockchip-only)
-#   - Hardware transcoding: left disabled. Your Talos VMs don't have GPU
-#     passthrough from Proxmox, so decode/encode runs on CPU. To enable later,
-#     pass /dev/dri into the VMs, then uncomment the hardware-acceleration
-#     block below.
+#   - Hardware transcoding: ENABLED (Intel Quick Sync / QSV). /dev/dri is
+#     passed through from Proxmox to the intel-quicksync worker, and the
+#     seed-qsv-encoding initContainer writes a QSV-enabled encoding.xml on
+#     first run (from the jellyfin-encoding-seed ConfigMap below). Before this,
+#     HardwareAccelerationType was "none" -> every transcode ran libx264 on
+#     CPU, saturating the 4-core limit and causing playback buffering/freezes.
 #   - No more /dev/{dma_heap,mali0,rga,mpp_service} — Rockchip-specific.
 #   - Service: LoadBalancer (MetalLB) so it gets a 10.0.10.210–230 IP.
 #
@@ -29,6 +31,77 @@ metadata:
     pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/audit: privileged
     pod-security.kubernetes.io/warn: privileged
+---
+# Seed config for Jellyfin's encoding.xml — enables Intel Quick Sync (QSV)
+# hardware transcoding out of the box. The seed-qsv-encoding initContainer only
+# writes this when /config/config/encoding.xml is ABSENT (fresh NAS / first
+# deploy), so it never clobbers settings you later change in the admin UI.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jellyfin-encoding-seed
+  namespace: jellyfin
+data:
+  encoding.xml: |
+    <?xml version="1.0" encoding="utf-8"?>
+    <EncodingOptions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+      <EncodingThreadCount>-1</EncodingThreadCount>
+      <EnableFallbackFont>false</EnableFallbackFont>
+      <EnableAudioVbr>false</EnableAudioVbr>
+      <DownMixAudioBoost>2</DownMixAudioBoost>
+      <DownMixStereoAlgorithm>None</DownMixStereoAlgorithm>
+      <MaxMuxingQueueSize>2048</MaxMuxingQueueSize>
+      <EnableThrottling>false</EnableThrottling>
+      <ThrottleDelaySeconds>180</ThrottleDelaySeconds>
+      <!-- Prune played HLS segments during playback so /cache stays bounded.
+           With this false, transcode segments accumulated until the cache
+           emptyDir hit its sizeLimit and the pod was EVICTED mid-stream. -->
+      <EnableSegmentDeletion>true</EnableSegmentDeletion>
+      <SegmentKeepSeconds>720</SegmentKeepSeconds>
+      <HardwareAccelerationType>qsv</HardwareAccelerationType>
+      <EncoderAppPathDisplay>/usr/lib/jellyfin-ffmpeg/ffmpeg</EncoderAppPathDisplay>
+      <VaapiDevice>/dev/dri/renderD128</VaapiDevice>
+      <QsvDevice>/dev/dri/renderD128</QsvDevice>
+      <EnableTonemapping>false</EnableTonemapping>
+      <EnableVppTonemapping>true</EnableVppTonemapping>
+      <EnableVideoToolboxTonemapping>false</EnableVideoToolboxTonemapping>
+      <TonemappingAlgorithm>bt2390</TonemappingAlgorithm>
+      <TonemappingMode>auto</TonemappingMode>
+      <TonemappingRange>auto</TonemappingRange>
+      <TonemappingDesat>0</TonemappingDesat>
+      <TonemappingPeak>100</TonemappingPeak>
+      <TonemappingParam>0</TonemappingParam>
+      <VppTonemappingBrightness>16</VppTonemappingBrightness>
+      <VppTonemappingContrast>1</VppTonemappingContrast>
+      <H264Crf>23</H264Crf>
+      <H265Crf>28</H265Crf>
+      <EncoderPreset xsi:nil="true" />
+      <DeinterlaceDoubleRate>false</DeinterlaceDoubleRate>
+      <DeinterlaceMethod>yadif</DeinterlaceMethod>
+      <EnableDecodingColorDepth10Hevc>true</EnableDecodingColorDepth10Hevc>
+      <EnableDecodingColorDepth10Vp9>true</EnableDecodingColorDepth10Vp9>
+      <EnableDecodingColorDepth10HevcRext>false</EnableDecodingColorDepth10HevcRext>
+      <EnableDecodingColorDepth12HevcRext>false</EnableDecodingColorDepth12HevcRext>
+      <EnableEnhancedNvdecDecoder>true</EnableEnhancedNvdecDecoder>
+      <PreferSystemNativeHwDecoder>true</PreferSystemNativeHwDecoder>
+      <EnableIntelLowPowerH264HwEncoder>false</EnableIntelLowPowerH264HwEncoder>
+      <EnableIntelLowPowerHevcHwEncoder>false</EnableIntelLowPowerHevcHwEncoder>
+      <EnableHardwareEncoding>true</EnableHardwareEncoding>
+      <AllowHevcEncoding>true</AllowHevcEncoding>
+      <AllowAv1Encoding>false</AllowAv1Encoding>
+      <EnableSubtitleExtraction>true</EnableSubtitleExtraction>
+      <HardwareDecodingCodecs>
+        <string>hevc</string>
+        <string>vp9</string>
+        <string>av1</string>
+        <string>mpeg2video</string>
+        <string>h264</string>
+        <string>vc1</string>
+      </HardwareDecodingCodecs>
+      <AllowOnDemandMetadataBasedKeyframeExtractionForExtensions>
+        <string>mkv</string>
+      </AllowOnDemandMetadataBasedKeyframeExtractionForExtensions>
+    </EncodingOptions>
 ---
 # Static PV pointing at the same NFS share root — separate PV from
 # filebrowser's so each namespace gets its own PVC binding.
@@ -79,6 +152,28 @@ spec:
       # Pin to the NAS-hosted worker that has Intel iGPU passthrough.
       nodeSelector:
         accelerator: intel-quicksync
+      initContainers:
+        # Seed a QSV-enabled encoding.xml on first run so Intel Quick Sync
+        # hardware transcoding works out of the box. No-op when the file already
+        # exists (it's NFS-persistent), so admin-UI changes are never clobbered.
+        - name: seed-qsv-encoding
+          image: jellyfin/jellyfin:10.11.11
+          command:
+            - sh
+            - -c
+            - >-
+              if [ -f /config/config/encoding.xml ]; then
+              echo "encoding.xml present — leaving as-is";
+              else
+              mkdir -p /config/config &&
+              cp /seed/encoding.xml /config/config/encoding.xml &&
+              echo "seeded QSV encoding.xml";
+              fi
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - {name: nas, mountPath: /config, subPath: config/jelly/config}
+            - {name: encoding-seed, mountPath: /seed}
       containers:
         - name: jellyfin
           image: jellyfin/jellyfin:10.11.11
@@ -105,9 +200,9 @@ spec:
             - {name: cache, mountPath: /cache}
             - {name: nas, mountPath: /media/movies, subPath: home/movie}
             - {name: nas, mountPath: /media/series, subPath: home/series}
-            # Intel Quick Sync via VAAPI. Enable in Jellyfin admin:
-            #   Dashboard → Playback → Hardware acceleration → VAAPI
-            #   Device: /dev/dri/renderD128
+            # Intel Quick Sync (QSV) — pre-enabled via the jellyfin-encoding-seed
+            # ConfigMap (HardwareAccelerationType=qsv, device /dev/dri/renderD128).
+            # Re-tune in Jellyfin admin → Dashboard → Playback → Transcoding.
             - {name: dri, mountPath: /dev/dri}
           startupProbe:
             httpGet: {path: /health, port: 8096}
@@ -127,10 +222,17 @@ spec:
         - name: nas
           persistentVolumeClaim:
             claimName: jellyfin-nas
-        # Ephemeral cache — up to 8 Gi of transcode scratch before eviction.
+        # QSV encoding.xml seed (consumed by the seed-qsv-encoding initContainer).
+        - name: encoding-seed
+          configMap:
+            name: jellyfin-encoding-seed
+        # Ephemeral cache — transcode scratch + image cache. sizeLimit is a hard
+        # eviction trigger: if usage exceeds it, kubelet evicts the pod. Paired
+        # with EnableSegmentDeletion=true (above) which keeps usage bounded; 20Gi
+        # gives headroom for several concurrent transcodes.
         - name: cache
           emptyDir:
-            sizeLimit: 8Gi
+            sizeLimit: 20Gi
         - name: dri
           hostPath:
             path: /dev/dri
