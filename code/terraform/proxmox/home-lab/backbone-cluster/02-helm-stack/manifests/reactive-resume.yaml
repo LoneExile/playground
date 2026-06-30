@@ -169,13 +169,22 @@ spec:
           resources:
             requests: {cpu: 100m, memory: 256Mi}
             limits:   {cpu: "1",  memory: 1Gi}
+          startupProbe:
+            exec: {command: [pg_isready, -U, reactive_resume, -d, reactive_resume]}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 36   # up to ~6min for recovery on slow NFS
+            timeoutSeconds: 10
           readinessProbe:
             exec: {command: [pg_isready, -U, reactive_resume, -d, reactive_resume]}
             initialDelaySeconds: 5
+            timeoutSeconds: 10
           livenessProbe:
             exec: {command: [pg_isready, -U, reactive_resume, -d, reactive_resume]}
             initialDelaySeconds: 30
             periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
       volumes:
         - name: nas
           persistentVolumeClaim:

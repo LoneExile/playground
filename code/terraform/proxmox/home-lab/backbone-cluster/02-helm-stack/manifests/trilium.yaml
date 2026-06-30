@@ -93,6 +93,12 @@ spec:
             limits:   {cpu: 1, memory: 2Gi}
           volumeMounts:
             - {name: nas, mountPath: /home/node/trilium-data, subPath: config/trilium/data}
+          startupProbe:
+            httpGet: {path: /, port: 8080}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 60   # allow very slow sqlite init / migration on NFS (~10min)
           readinessProbe:
             httpGet: {path: /, port: 8080}
             initialDelaySeconds: 30
@@ -104,6 +110,7 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 60
             timeoutSeconds: 10
+            failureThreshold: 5
       volumes:
         - name: nas
           persistentVolumeClaim:

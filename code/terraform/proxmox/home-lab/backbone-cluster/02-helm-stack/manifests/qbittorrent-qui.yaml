@@ -87,6 +87,18 @@ spec:
     metadata:
       labels: {app: qbittorrent}
     spec:
+      initContainers:
+        - name: clean-locks
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              rm -f /config/qBittorrent/qBittorrent-data.conf.lock /config/qBittorrent/lockfile /config/qBittorrent/BT_backup/lock 2>/dev/null || true
+              echo "qbittorrent locks cleaned"
+          volumeMounts:
+            - {name: nas, mountPath: /config, subPath: config/qbittorrent}
       containers:
         - name: qbittorrent
           image: lscr.io/linuxserver/qbittorrent:5.2.1_v2.0.13-ls460
@@ -95,8 +107,8 @@ spec:
             - {name: bt-tcp, containerPort: 6881, protocol: TCP}
             - {name: bt-udp, containerPort: 6881, protocol: UDP}
           env:
-            - {name: PUID, value: "0"}
-            - {name: PGID, value: "0"}
+            - {name: PUID, value: "911"}
+            - {name: PGID, value: "911"}
             - {name: TZ,   value: "Asia/Bangkok"}
             - {name: WEBUI_PORT, value: "8080"}
             - {name: TORRENTING_PORT, value: "6881"}
@@ -108,12 +120,14 @@ spec:
             - {name: nas, mountPath: /downloads, subPath: home/download}
           readinessProbe:
             httpGet: {path: /, port: 8080}
-            initialDelaySeconds: 15
-            periodSeconds: 10
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 20
           livenessProbe:
             httpGet: {path: /, port: 8080}
-            initialDelaySeconds: 60
+            initialDelaySeconds: 120
             periodSeconds: 30
+            failureThreshold: 5
       volumes:
         - name: nas
           persistentVolumeClaim:

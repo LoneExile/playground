@@ -115,6 +115,20 @@ spec:
     metadata:
       labels: {app: postgres}
     spec:
+      initContainers:
+        - name: pgdata-prep
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              chown 999:999 /var/lib/postgresql/data
+              chmod 700 /var/lib/postgresql/data
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - {name: nas, mountPath: /var/lib/postgresql/data, subPath: config/paperless/db/data}
       containers:
         - name: postgres
           image: postgres:16
@@ -151,13 +165,22 @@ spec:
                     psql -h /var/run/postgresql -U paperless -d paperless \
                       -c "ALTER USER paperless WITH PASSWORD '$PAPERLESS_DB_PASSWORD_DESIRED';" \
                       || true
+          startupProbe:
+            exec: {command: [pg_isready, -h, /var/run/postgresql, -U, paperless, -d, paperless]}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 36   # up to ~6min for recovery on slow NFS
+            timeoutSeconds: 10
           readinessProbe:
             exec: {command: [pg_isready, -h, /var/run/postgresql, -U, paperless, -d, paperless]}
             initialDelaySeconds: 5
+            timeoutSeconds: 10
           livenessProbe:
             exec: {command: [pg_isready, -h, /var/run/postgresql, -U, paperless, -d, paperless]}
             initialDelaySeconds: 30
             periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
       volumes:
         - name: nas
           persistentVolumeClaim:
