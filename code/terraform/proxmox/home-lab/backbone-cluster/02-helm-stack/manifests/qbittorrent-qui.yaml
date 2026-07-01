@@ -101,7 +101,7 @@ spec:
             - {name: nas, mountPath: /config, subPath: config/qbittorrent}
       containers:
         - name: qbittorrent
-          image: lscr.io/linuxserver/qbittorrent:5.2.1_v2.0.13-ls460
+          image: lscr.io/linuxserver/qbittorrent:5.2.2_v2.0.13-ls464
           ports:
             - {name: http,   containerPort: 8080}
             - {name: bt-tcp, containerPort: 6881, protocol: TCP}
@@ -167,7 +167,7 @@ spec:
     spec:
       containers:
         - name: qui
-          image: ghcr.io/autobrr/qui:v1.20.0
+          image: ghcr.io/autobrr/qui:v1.22.0
           ports:
             - {name: http, containerPort: 7476}
           env:

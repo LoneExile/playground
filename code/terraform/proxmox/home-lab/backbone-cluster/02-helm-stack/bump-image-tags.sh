@@ -34,6 +34,11 @@ IMAGES=(
   "lissy93/dashy|Lissy93/dashy||"
   "lscr.io/linuxserver/qbittorrent|linuxserver/docker-qbittorrent||"
   "lscr.io/linuxserver/syncthing|linuxserver/docker-syncthing||"
+  "ghcr.io/immich-app/immich-server|immich-app/immich||"
+  "ghcr.io/immich-app/immich-machine-learning|immich-app/immich||"
+  "ghcr.io/paperless-ngx/paperless-ngx|paperless-ngx/paperless-ngx|v|"
+  "amruthpillai/reactive-resume|AmruthPillai/Reactive-Resume||"
+  "filebrowser/filebrowser|filebrowser/filebrowser||"
 )
 # Note: apache/tika:latest-full intentionally not included — Apache repo
 # uses a tags-only release flow, not GitHub Releases. Bump manually.

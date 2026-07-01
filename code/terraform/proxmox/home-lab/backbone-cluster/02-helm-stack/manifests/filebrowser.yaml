@@ -64,6 +64,11 @@ metadata:
   labels: {app: filebrowser}
 spec:
   replicas: 1
+  # filebrowser uses a single-writer bbolt DB on the NFS subPath. RollingUpdate
+  # surges a new pod that can't acquire the DB lock held by the old one, so it
+  # crashloops with `Error: timeout`. Recreate kills the old pod first.
+  strategy:
+    type: Recreate
   selector:
     matchLabels: {app: filebrowser}
   template:
@@ -72,7 +77,7 @@ spec:
     spec:
       containers:
         - name: filebrowser
-          image: filebrowser/filebrowser:v2.31.2
+          image: filebrowser/filebrowser:v2.63.17
           # Default DB path is /database.db (a file at /), but we mount the NFS
           # subPath as a *directory* at /database. Point -d at a file inside
           # that directory so the DB actually persists across pod restarts.
