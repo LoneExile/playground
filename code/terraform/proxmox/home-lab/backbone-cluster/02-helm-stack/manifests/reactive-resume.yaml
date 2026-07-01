@@ -1,58 +1,47 @@
 # Reactive Resume (https://github.com/AmruthPillai/Reactive-Resume) — self-hosted
-# resume builder. Pinned to the stable v4.5.5 self-host stack (the upstream
-# `main` branch is unreleased v5 on Hono + SeaweedFS + Redis; the published
-# `amruthpillai/reactive-resume` image is v4). The v4 stack is four services:
+# resume builder. v5.1.9 stack (Hono rewrite + Better Auth). v5 is NOT compatible
+# with v4 data, and upstream ships no bulk v4->v5 migration; this instance was
+# provisioned FRESH (old v4 data discarded on purpose). Four services:
 #
-#   app     amruthpillai/reactive-resume:v4.5.5  :3000   (stateless; Next/NestJS)
-#   postgres postgres:16                          :5432   data on NFS
-#   minio   minio/minio                           :9000   object store on NFS
-#   chrome  ghcr.io/browserless/chromium          :3000   PDF/preview printer (ephemeral)
+#   app      amruthpillai/reactive-resume:v5.1.9  :3000  (stateless; Hono + client-side PDF)
+#   postgres postgres:16                          :5432  data on NFS (fresh db-v5 subtree)
+#   redis    redis:7-alpine                       :6379  ephemeral (agent stream cache; no NFS)
+#   minio    minio/minio:latest                   :9000  S3 object store on NFS
 #
-# NFS layout (192.168.1.179:/zpool1/nfs_share) — same one-PV-at-root + subPath
-# pattern as immich/paperless/syncthing:
-#   config/reactive-resume/db    → /var/lib/postgresql/data on postgres (999:999, fresh)
+# vs the old v4 stack: the browserless/chromium printer is GONE (v5 renders PDFs
+# client-side via @react-pdf/renderer), and Redis is a NEW dependency.
+#
+# NFS layout (192.168.1.179:/zpool1/nfs_share) — one-PV-at-root + subPath pattern:
+#   config/reactive-resume/db-v5 → /var/lib/postgresql/data on postgres (999:999, fresh v5 DB)
 #   config/reactive-resume/minio → /data                    on minio    (1000:1000)
-# The app and chrome hold no persistent state, so only postgres + minio mount NFS.
+# The old config/reactive-resume/db (v4 PGDATA) is intentionally left untouched on
+# the NAS so a git-revert to the v4 manifest still finds its data for rollback.
+# Redis holds only disposable agent-stream cache, so it uses an emptyDir (no NFS).
 #
-# Exposure:
-#   App   https://resume.home.0dl.me        (LAN, wildcard cert)
-#         https://resume.0dl.me             (Cloudflare Tunnel)
+# Exposure (unchanged from v4):
+#   App   https://resume.home.0dl.me         (LAN, wildcard cert)
+#         https://resume.0dl.me              (Cloudflare Tunnel)  <- APP_URL
 #   Minio https://resume-storage.home.0dl.me (LAN, wildcard cert)
-#         https://resume-storage.0dl.me     (Cloudflare Tunnel)
-# Minio MUST be browser-reachable: the app hands clients absolute URLs under
-# STORAGE_URL to fetch avatars and exported PDFs. PUBLIC_URL / STORAGE_URL are
-# pinned to the public (tunnel) hostnames so resume share links resolve both on
-# LAN and from the public internet. RR's StorageService creates the `default`
-# bucket and sets an anonymous-read policy on first boot (STORAGE_SKIP_BUCKET_CHECK
-# = false), so public GETs of stored objects work without extra minio config.
+#         https://resume-storage.0dl.me      (Cloudflare Tunnel)
+# APP_URL MUST equal the external HTTPS origin (Better Auth derives callback/JWKS
+# URLs from it); a mismatch shows up as a login loop. The bucket-init Job sets an
+# anonymous-download policy on the v5 bucket so publicly-shared resume assets load.
 #
-# This manifest is rendered via templatefile() in apps.tf. The real values for
-# the $${reactive_resume_*} placeholders come from sensitive variables in
-# 02-helm-stack/variables.tf, populated from terraform.tfvars (gitignored).
+# Rendered via templatefile() in apps.tf. The $${reactive_resume_*} placeholders
+# come from sensitive vars in 02-helm-stack/variables.tf <- terraform.tfvars.
 #
 # DEPLOY STEPS:
-#   1. Add the five secrets to ../terraform.tfvars:
-#        reactive_resume_db_password         = "$(openssl rand -base64 32)"
-#        reactive_resume_access_token_secret = "$(openssl rand -base64 64)"
-#        reactive_resume_refresh_token_secret= "$(openssl rand -base64 64)"
-#        reactive_resume_chrome_token        = "$(openssl rand -hex 32)"
-#        reactive_resume_storage_secret_key  = "$(openssl rand -base64 24)"   # minio root password, >=8 chars
-#   2. terraform apply (from 02-helm-stack/).
-#   3. Cloudflare-side (manual, can't be terraformed here) — for BOTH public hosts:
-#        a. DNS: add CNAME `resume.0dl.me` and `resume-storage.0dl.me`
-#             → `<tunnel-id>.cfargotunnel.com` (same tunnel chat/immich use).
-#        b. Tunnel "Published application routes" UI, one row each:
-#             Subdomain: resume          / Domain: 0dl.me / Path: empty
-#             Subdomain: resume-storage  / Domain: 0dl.me / Path: empty
-#             Service: HTTP → 10.0.10.212  (gateway external IP)
-#           Empty Path is critical (see the immich `^/blog` regex incident).
+#   1. Secrets already in ../terraform.tfvars: reactive_resume_{db_password,
+#      auth_secret,encryption_secret,storage_secret_key}.
+#   2. terraform apply (from 02-helm-stack/). v4 pods are replaced; brief downtime.
+#   3. Cloudflare tunnel routes for resume.0dl.me / resume-storage.0dl.me are
+#      already published (carried over from v4) — no CF change needed.
 #   4. Watch rollout:
 #        kubectl -n reactive-resume get pods,jobs -w
-#        kubectl -n reactive-resume logs -f deploy/app          # waits for prisma migrate
-#   5. Open https://resume.home.0dl.me, register your account (signups are open).
-#   6. FOLLOW-UP — lock down signups once your account exists: set
-#        DISABLE_SIGNUPS: "true" on deploy/app below and re-apply. Optionally
-#        wire Cloudflare Access on resume.0dl.me (currently unauthenticated edge).
+#        kubectl -n reactive-resume logs -f deploy/app     # runs Drizzle migrations on boot
+#   5. Open https://resume.home.0dl.me and register your account (signups open).
+#   6. FOLLOW-UP — lock down signups: set FLAG_DISABLE_SIGNUPS: "true" on deploy/app
+#      below and re-apply.
 
 apiVersion: v1
 kind: Namespace
@@ -101,16 +90,15 @@ metadata:
 type: Opaque
 stringData:
   postgres-password: "${reactive_resume_db_password}"
-  database-url: "postgresql://reactive_resume:${reactive_resume_db_password}@postgres:5432/reactive_resume?schema=public"
-  access-token-secret: "${reactive_resume_access_token_secret}"
-  refresh-token-secret: "${reactive_resume_refresh_token_secret}"
-  chrome-token: "${reactive_resume_chrome_token}"
+  database-url: "postgresql://reactive_resume:${reactive_resume_db_password}@postgres:5432/reactive_resume"
+  auth-secret: "${reactive_resume_auth_secret}"
+  encryption-secret: "${reactive_resume_encryption_secret}"
   storage-secret-key: "${reactive_resume_storage_secret_key}"
 ---
-# Postgres 16 (debian) — fresh PGDATA on NFS. Uses uid 999 like the proven
-# immich PG-on-this-NFS setup (the official debian image's postgres user is
-# 999; alpine's is 70). initContainer chowns + chmod 700 because k8s
-# auto-creates the subPath root-owned and initdb refuses a non-700 PGDATA.
+# Postgres 16 (debian) — FRESH v5 PGDATA on NFS at config/reactive-resume/db-v5.
+# Uses uid 999 like the proven immich PG-on-this-NFS setup. initContainer chowns +
+# chmod 700 because k8s auto-creates the subPath root-owned and initdb refuses a
+# non-700 PGDATA. On first boot initdb creates the 'reactive_resume' role + db.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -149,7 +137,7 @@ spec:
           securityContext:
             runAsUser: 0
           volumeMounts:
-            - {name: nas, mountPath: /var/lib/postgresql/data, subPath: config/reactive-resume/db}
+            - {name: nas, mountPath: /var/lib/postgresql/data, subPath: config/reactive-resume/db-v5}
       containers:
         - name: postgres
           image: postgres:16
@@ -164,7 +152,7 @@ spec:
             - {name: POSTGRES_INITDB_ARGS, value: "--data-checksums"}
             - {name: PGDATA, value: /var/lib/postgresql/data}
           volumeMounts:
-            - {name: nas,  mountPath: /var/lib/postgresql/data, subPath: config/reactive-resume/db}
+            - {name: nas,  mountPath: /var/lib/postgresql/data, subPath: config/reactive-resume/db-v5}
             - {name: dshm, mountPath: /dev/shm}
           resources:
             requests: {cpu: 100m, memory: 256Mi}
@@ -206,7 +194,7 @@ spec:
 ---
 # Minio — S3-compatible object store for uploaded avatars + exported PDFs.
 # Runs as uid 1000; initContainer chowns the NFS subPath to match. MINIO_ROOT_USER
-# must equal the app's STORAGE_ACCESS_KEY; password comes from the shared secret.
+# must equal the app's S3_ACCESS_KEY_ID; password comes from the shared secret.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -275,64 +263,62 @@ spec:
   ports:
     - {name: s3, port: 9000, targetPort: s3}
 ---
-# Chrome (browserless/chromium) — headless print backend the app drives over a
-# websocket for PDF export and live previews. Stateless; no NFS. The app
-# authenticates with CHROME_TOKEN against the TOKEN set here.
+# Redis — NEW in v5. Backs the authenticated /agent AI workspace (chat/stream
+# cache). Data is disposable, so it runs in-memory on an emptyDir (no persistence,
+# no NFS). ClusterIP only; protected-mode is disabled because the app connects by
+# service name (non-loopback) with no password — safe since it's never exposed.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: chrome
+  name: redis
   namespace: reactive-resume
-  labels: {app: chrome}
+  labels: {app: redis}
 spec:
   replicas: 1
   selector:
-    matchLabels: {app: chrome}
+    matchLabels: {app: redis}
   template:
     metadata:
-      labels: {app: chrome}
+      labels: {app: redis}
     spec:
-      enableServiceLinks: false
       containers:
-        - name: chrome
-          image: ghcr.io/browserless/chromium:latest
+        - name: redis
+          image: redis:7-alpine
+          args: [redis-server, --protected-mode, "no", --save, "", --appendonly, "no"]
           ports:
-            - {name: ws, containerPort: 3000}
-          env:
-            - {name: HEALTH, value: "true"}
-            - {name: PROXY_HOST, value: "chrome"}
-            - {name: PROXY_PORT, value: "3000"}
-            - {name: PROXY_SSL, value: "false"}
-            - name: TOKEN
-              valueFrom:
-                secretKeyRef: {name: reactive-resume-secrets, key: chrome-token}
+            - {name: redis, containerPort: 6379}
+          volumeMounts:
+            - {name: data, mountPath: /data}
           resources:
-            requests: {cpu: 100m, memory: 512Mi}
-            limits:   {cpu: "2",  memory: 2Gi}
+            requests: {cpu: 25m, memory: 64Mi}
+            limits:   {cpu: 250m, memory: 256Mi}
           readinessProbe:
-            tcpSocket: {port: ws}
-            initialDelaySeconds: 5
+            exec: {command: [redis-cli, ping]}
+            initialDelaySeconds: 3
             periodSeconds: 15
           livenessProbe:
-            tcpSocket: {port: ws}
-            initialDelaySeconds: 30
+            tcpSocket: {port: redis}
+            initialDelaySeconds: 20
             periodSeconds: 30
+      volumes:
+        - name: data
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: chrome
+  name: redis
   namespace: reactive-resume
-  labels: {app: chrome}
+  labels: {app: redis}
 spec:
   type: ClusterIP
-  selector: {app: chrome}
+  selector: {app: redis}
   ports:
-    - {name: ws, port: 3000, targetPort: ws}
+    - {name: redis, port: 6379, targetPort: redis}
 ---
-# App — Reactive Resume server (UI + API in one image). Runs `prisma migrate
-# deploy` on boot, so the first start can take a minute; the startupProbe gives
-# it headroom before liveness kicks in. Waits for postgres to accept connections.
+# App — Reactive Resume v5 server (Hono). Runs Drizzle migrations on boot against
+# the fresh DB, so first start can take a minute; the startupProbe gives it
+# headroom before liveness kicks in. Waits for postgres to accept connections.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -365,56 +351,50 @@ spec:
               exit 1
       containers:
         - name: app
-          image: amruthpillai/reactive-resume:v4.5.5
+          image: amruthpillai/reactive-resume:v5.1.9
           ports:
             - {name: http, containerPort: 3000}
           env:
             - {name: TZ, value: "Asia/Bangkok"}
-            - {name: PORT, value: "3000"}
             - {name: NODE_ENV, value: "production"}
-            # Public-facing URLs — pinned to the tunnel hostnames so share links
-            # and stored-asset URLs resolve on LAN and from the public internet.
-            - {name: PUBLIC_URL,  value: "https://resume.0dl.me"}
-            - {name: STORAGE_URL, value: "https://resume-storage.0dl.me/default"}
-            # Database (Prisma) — full URL incl. password from the secret.
+            - {name: PORT,        value: "3000"}   # public app (Hono web)
+            - {name: SERVER_PORT, value: "3001"}   # internal API server (v5 runtime split)
+            # Public origin — Better Auth derives callback/JWKS URLs from this.
+            # MUST equal the external HTTPS origin or logins loop.
+            - {name: APP_URL, value: "https://resume.0dl.me"}
+            # Database (Drizzle) — full URL incl. password from the secret.
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef: {name: reactive-resume-secrets, key: database-url}
-            # Auth token signing secrets.
-            - name: ACCESS_TOKEN_SECRET
+            # Better Auth — single signing secret (replaces v4 access+refresh).
+            - name: AUTH_SECRET
               valueFrom:
-                secretKeyRef: {name: reactive-resume-secrets, key: access-token-secret}
-            - name: REFRESH_TOKEN_SECRET
+                secretKeyRef: {name: reactive-resume-secrets, key: auth-secret}
+            # Encrypts saved AI-provider credentials.
+            - name: ENCRYPTION_SECRET
               valueFrom:
-                secretKeyRef: {name: reactive-resume-secrets, key: refresh-token-secret}
-            # Printer (Chrome) — in-cluster websocket, token-authenticated.
-            - {name: CHROME_URL, value: "ws://chrome:3000"}
-            - name: CHROME_TOKEN
-              valueFrom:
-                secretKeyRef: {name: reactive-resume-secrets, key: chrome-token}
-            # Storage (Minio) — server-side S3 client talks to the in-cluster
-            # service; STORAGE_URL above is only for the URLs handed to browsers.
-            - {name: STORAGE_ENDPOINT, value: "minio"}
-            - {name: STORAGE_PORT,     value: "9000"}
-            - {name: STORAGE_REGION,   value: "us-east-1"}
-            - {name: STORAGE_BUCKET,   value: "default"}
-            - {name: STORAGE_ACCESS_KEY, value: "reactive-resume"}
-            - name: STORAGE_SECRET_KEY
+                secretKeyRef: {name: reactive-resume-secrets, key: encryption-secret}
+            # Redis — agent workspace cache.
+            - {name: REDIS_URL, value: "redis://redis:6379"}
+            # Storage — S3-compatible (Minio). Path-style is required for Minio.
+            - {name: S3_ENDPOINT,        value: "http://minio:9000"}
+            - {name: S3_REGION,          value: "us-east-1"}
+            - {name: S3_BUCKET,          value: "reactive-resume"}
+            - {name: S3_ACCESS_KEY_ID,   value: "reactive-resume"}
+            - name: S3_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef: {name: reactive-resume-secrets, key: storage-secret-key}
-            - {name: STORAGE_USE_SSL,          value: "false"}
-            - {name: STORAGE_SKIP_BUCKET_CHECK, value: "false"}
+            - {name: S3_FORCE_PATH_STYLE, value: "true"}
             # Email — no SMTP wired; the app logs verification emails to stdout.
             # Read them with: kubectl -n reactive-resume logs deploy/app
-            - {name: MAIL_FROM, value: "noreply@0dl.me"}
-            # Instance locked: account created, signups disabled. Flip back to
-            # "false" + re-apply only if you need to register another account.
-            - {name: DISABLE_SIGNUPS, value: "true"}
+            # Signups open for first-boot account creation. Flip to "true" +
+            # re-apply once your account exists.
+            - {name: FLAG_DISABLE_SIGNUPS, value: "false"}
           startupProbe:
             httpGet: {path: /api/health, port: http}
             initialDelaySeconds: 10
             periodSeconds: 5
-            failureThreshold: 60     # ~5 min cap on first-boot prisma migration
+            failureThreshold: 60     # ~5 min cap on first-boot drizzle migration
           readinessProbe:
             httpGet: {path: /api/health, port: http}
             periodSeconds: 15
@@ -456,8 +436,7 @@ spec:
           port: 3000
 ---
 # Tunnel route — bare resume.0dl.me via Cloudflare Tunnel (CF terminates TLS;
-# bind to the :http listener). Requires the manual CF DNS + published-route
-# steps in the header. Unauthenticated at the edge for now.
+# bind to the :http listener).
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -510,3 +489,39 @@ spec:
     - backendRefs:
         - name: minio
           port: 9000
+---
+# Bucket-init Job — v5 does not auto-create the S3 bucket, so seed it with mc.
+# Waits for minio, creates the bucket idempotently, and sets an anonymous-download
+# policy so publicly-shared resume assets resolve via resume-storage.0dl.me.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-bucket-init
+  namespace: reactive-resume
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app: minio-bucket-init}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              until mc alias set rr http://minio:9000 "$MINIO_USER" "$MINIO_PASS" >/dev/null 2>&1; do
+                echo "waiting for minio..."; sleep 3
+              done
+              mc mb --ignore-existing rr/reactive-resume
+              mc anonymous set download rr/reactive-resume
+              echo "bucket reactive-resume ready"
+          env:
+            - {name: MINIO_USER, value: "reactive-resume"}
+            - name: MINIO_PASS
+              valueFrom:
+                secretKeyRef: {name: reactive-resume-secrets, key: storage-secret-key}

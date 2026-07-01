@@ -181,29 +181,24 @@ variable "zennotes_auth_token" {
 # Used by manifests/reactive-resume.yaml (rendered via templatefile in apps.tf).
 # Stack is fresh on first deploy: postgres initdb creates the 'reactive_resume'
 # role from db_password; minio creates its root user from storage_secret_key; the
-# app signs auth tokens with the access/refresh secrets and talks to chrome with
-# chrome_token. Rotating db_password requires also resetting the role's password
-# (it's only read by initdb on an empty PGDATA); the others roll cleanly on apply.
+# app (v5, Better Auth) signs sessions with auth_secret and encrypts saved
+# provider credentials with encryption_secret. Rotating db_password requires also
+# resetting the role's password (it's only read by initdb on an empty PGDATA);
+# the others roll cleanly on apply (rotating auth_secret logs everyone out).
 variable "reactive_resume_db_password" {
   description = "Password for the 'reactive_resume' Postgres role. Set by initdb on first boot; embedded in DATABASE_URL. Generate with: openssl rand -base64 32"
   type        = string
   sensitive   = true
 }
 
-variable "reactive_resume_access_token_secret" {
-  description = "ACCESS_TOKEN_SECRET — signs short-lived JWT access tokens. Rotating invalidates active access tokens. Generate with: openssl rand -base64 64"
+variable "reactive_resume_auth_secret" {
+  description = "AUTH_SECRET — Better Auth session/token signing secret (v5; replaces the v4 access+refresh token secrets). Generate with: openssl rand -hex 32"
   type        = string
   sensitive   = true
 }
 
-variable "reactive_resume_refresh_token_secret" {
-  description = "REFRESH_TOKEN_SECRET — signs refresh tokens. Rotating forces all users to re-login. Generate with: openssl rand -base64 64"
-  type        = string
-  sensitive   = true
-}
-
-variable "reactive_resume_chrome_token" {
-  description = "CHROME_TOKEN — shared secret the app uses to authenticate to the browserless chrome printer. Generate with: openssl rand -hex 32"
+variable "reactive_resume_encryption_secret" {
+  description = "ENCRYPTION_SECRET — encrypts saved AI-provider credentials (v5). Generate with: openssl rand -hex 32"
   type        = string
   sensitive   = true
 }
