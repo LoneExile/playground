@@ -387,9 +387,9 @@ spec:
             - {name: S3_FORCE_PATH_STYLE, value: "true"}
             # Email — no SMTP wired; the app logs verification emails to stdout.
             # Read them with: kubectl -n reactive-resume logs deploy/app
-            # Signups open for first-boot account creation. Flip to "true" +
-            # re-apply once your account exists.
-            - {name: FLAG_DISABLE_SIGNUPS, value: "false"}
+            # Signups locked — owner account (lex / me@apinant.dev) exists. Flip
+            # back to "false" + re-apply only to register another account.
+            - {name: FLAG_DISABLE_SIGNUPS, value: "true"}
           startupProbe:
             httpGet: {path: /api/health, port: http}
             initialDelaySeconds: 10
