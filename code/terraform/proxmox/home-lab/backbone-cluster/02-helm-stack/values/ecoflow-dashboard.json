@@ -4,7 +4,7 @@
   "tags": ["ecoflow"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "refresh": "30s",
   "time": {"from": "now-6h", "to": "now"},
   "templating": {"list": []},
@@ -180,7 +180,7 @@
       "id": 10,
       "type": "stat",
       "title": "Used Today",
-      "description": "Energy drawn from the unit over the last 24h. Integrated from output power (avg W x hours); extrapolates from available samples until a full day of history exists, then exact.",
+      "description": "Energy drawn from the unit over the last 24h, from the cumulative Wh counter (increase). True usage across pod restarts; shows only elapsed history until a full day accrues.",
       "gridPos": {"h": 5, "w": 8, "x": 0, "y": 17},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "fieldConfig": {
@@ -194,14 +194,14 @@
         "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
       },
       "targets": [
-        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "avg by (name) (avg_over_time(ecoflow_output_power_watts[24h])) * 24 / 1000", "legendFormat": "{{name}}", "instant": true}
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (name) (increase(ecoflow_energy_output_watthours_total[24h])) / 1000", "legendFormat": "{{name}}", "instant": true}
       ]
     },
     {
       "id": 11,
       "type": "stat",
       "title": "Used This Week",
-      "description": "Energy drawn from the unit over the last 7 days. Integrated from output power (avg W x hours); extrapolates from available samples until a full week of history exists, then exact.",
+      "description": "Energy drawn from the unit over the last 7 days, from the cumulative Wh counter (increase). True usage across pod restarts; shows only elapsed history until a full week accrues.",
       "gridPos": {"h": 5, "w": 8, "x": 8, "y": 17},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "fieldConfig": {
@@ -215,14 +215,14 @@
         "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
       },
       "targets": [
-        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "avg by (name) (avg_over_time(ecoflow_output_power_watts[7d])) * 168 / 1000", "legendFormat": "{{name}}", "instant": true}
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (name) (increase(ecoflow_energy_output_watthours_total[7d])) / 1000", "legendFormat": "{{name}}", "instant": true}
       ]
     },
     {
       "id": 12,
       "type": "stat",
       "title": "Used This Month",
-      "description": "Energy drawn from the unit over the last 30 days. Integrated from output power (avg W x hours); extrapolates from available samples until a full month of history exists, then exact.",
+      "description": "Energy drawn from the unit over the last 30 days, from the cumulative Wh counter (increase). True usage across pod restarts; shows only elapsed history until a full month accrues.",
       "gridPos": {"h": 5, "w": 8, "x": 16, "y": 17},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "fieldConfig": {
@@ -236,7 +236,7 @@
         "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
       },
       "targets": [
-        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "avg by (name) (avg_over_time(ecoflow_output_power_watts[30d])) * 720 / 1000", "legendFormat": "{{name}}", "instant": true}
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (name) (increase(ecoflow_energy_output_watthours_total[30d])) / 1000", "legendFormat": "{{name}}", "instant": true}
       ]
     }
   ]
