@@ -1,0 +1,243 @@
+{
+  "uid": "ecoflow-delta3",
+  "title": "EcoFlow DELTA 3",
+  "tags": ["ecoflow"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "templating": {"list": []},
+  "annotations": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "gauge",
+      "title": "Battery SoC",
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "orange", "value": 20},
+              {"color": "green", "value": 50}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ecoflow_battery_soc_percent", "legendFormat": "{{name}}"}
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Status",
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"1": {"text": "UP", "color": "green", "index": 0}}},
+            {"type": "value", "options": {"0": {"text": "DOWN", "color": "red", "index": 1}}}
+          ],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ecoflow_up", "legendFormat": "{{name}}"}
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Input Power",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"unit": "watt", "color": {"mode": "fixed", "fixedColor": "green"}},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ecoflow_input_power_watts", "legendFormat": "in"}
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Output Power",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"unit": "watt", "color": {"mode": "fixed", "fixedColor": "orange"}},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ecoflow_output_power_watts", "legendFormat": "out"}
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Charge Remaining",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "m"}, "overrides": []},
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ecoflow_charge_remaining_minutes", "legendFormat": "charge"}
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Discharge Remaining",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "m"}, "overrides": []},
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ecoflow_discharge_remaining_minutes", "legendFormat": "discharge"}
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Battery SoC over time",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"unit": "percent", "min": 0, "max": 100, "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2}},
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ecoflow_battery_soc_percent", "legendFormat": "SoC {{name}}"}
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Power in / out",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"unit": "watt", "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2}},
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ecoflow_input_power_watts", "legendFormat": "in"},
+        {"refId": "B", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ecoflow_output_power_watts", "legendFormat": "out"}
+      ]
+    },
+    {
+      "id": 9,
+      "type": "row",
+      "title": "Energy Consumed (output)",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 16},
+      "panels": []
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Used Today",
+      "description": "Energy drawn from the unit over the last 24h. Integrated from output power (avg W x hours); extrapolates from available samples until a full day of history exists, then exact.",
+      "gridPos": {"h": 5, "w": 8, "x": 0, "y": 17},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"unit": "kwatth", "decimals": 2, "color": {"mode": "fixed", "fixedColor": "orange"}},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "avg by (name) (avg_over_time(ecoflow_output_power_watts[24h])) * 24 / 1000", "legendFormat": "{{name}}", "instant": true}
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Used This Week",
+      "description": "Energy drawn from the unit over the last 7 days. Integrated from output power (avg W x hours); extrapolates from available samples until a full week of history exists, then exact.",
+      "gridPos": {"h": 5, "w": 8, "x": 8, "y": 17},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"unit": "kwatth", "decimals": 2, "color": {"mode": "fixed", "fixedColor": "orange"}},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "avg by (name) (avg_over_time(ecoflow_output_power_watts[7d])) * 168 / 1000", "legendFormat": "{{name}}", "instant": true}
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Used This Month",
+      "description": "Energy drawn from the unit over the last 30 days. Integrated from output power (avg W x hours); extrapolates from available samples until a full month of history exists, then exact.",
+      "gridPos": {"h": 5, "w": 8, "x": 16, "y": 17},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"unit": "kwatth", "decimals": 2, "color": {"mode": "fixed", "fixedColor": "orange"}},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "avg by (name) (avg_over_time(ecoflow_output_power_watts[30d])) * 720 / 1000", "legendFormat": "{{name}}", "instant": true}
+      ]
+    }
+  ]
+}

@@ -276,6 +276,11 @@ resource "talos_machine_configuration_apply" "node" {
           "net.ipv4.neigh.default.gc_thresh1" = "4096"
           "net.ipv4.neigh.default.gc_thresh2" = "8192"
           "net.ipv4.neigh.default.gc_thresh3" = "16384"
+          # Talos zeroes user.max_user_namespaces, which disables *unprivileged*
+          # user namespaces. Rootless BuildKit (GitLab CI image builds) needs a
+          # nonzero value to clone a userns. Runtime-writable — Talos applies it
+          # live, no reboot. No privileged/CAP_SYS_ADMIN needed on the build pod.
+          "user.max_user_namespaces" = "15000"
         }
       }
       cluster = {
@@ -576,6 +581,11 @@ resource "talos_machine_configuration_apply" "worker" {
           "net.ipv4.neigh.default.gc_thresh1" = "4096"
           "net.ipv4.neigh.default.gc_thresh2" = "8192"
           "net.ipv4.neigh.default.gc_thresh3" = "16384"
+          # Talos zeroes user.max_user_namespaces, which disables *unprivileged*
+          # user namespaces. Rootless BuildKit (GitLab CI image builds) needs a
+          # nonzero value to clone a userns. Runtime-writable — Talos applies it
+          # live, no reboot. No privileged/CAP_SYS_ADMIN needed on the build pod.
+          "user.max_user_namespaces" = "15000"
         }
       }
     })
@@ -675,6 +685,11 @@ resource "talos_machine_configuration_apply" "pi_worker" {
           "net.ipv4.neigh.default.gc_thresh1" = "4096"
           "net.ipv4.neigh.default.gc_thresh2" = "8192"
           "net.ipv4.neigh.default.gc_thresh3" = "16384"
+          # Talos zeroes user.max_user_namespaces, which disables *unprivileged*
+          # user namespaces. Rootless BuildKit (GitLab CI image builds) needs a
+          # nonzero value to clone a userns. Runtime-writable — Talos applies it
+          # live, no reboot. No privileged/CAP_SYS_ADMIN needed on the build pod.
+          "user.max_user_namespaces" = "15000"
         }
       }
     })

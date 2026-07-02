@@ -41,6 +41,23 @@ locals {
       gitlab_root_password_b64 = base64encode(var.gitlab_root_password)
       gitlab_ssh_ip            = var.gitlab_ssh_ip
     })
+    ecoflow = templatefile("${path.module}/manifests/ecoflow-monitor.yaml", {
+      ecoflow_image        = var.ecoflow_image
+      ecoflow_email_b64    = base64encode(var.ecoflow_email)
+      ecoflow_password_b64 = base64encode(var.ecoflow_password)
+      # Harbor pull-robot docker credential. The robot name is deterministic
+      # (robot$<project>+<name>) and the secret is the tfvars value TF also pins
+      # on the robot — referenced literally (not via the harbor_robot_account
+      # resource) to avoid a dependency cycle through the helm_release chain.
+      # The robot itself is created in cicd.tf.
+      harbor_pull_dockerconfig_b64 = base64encode(jsonencode({
+        auths = {
+          "harbor.${local.fqdn_base}" = {
+            auth = base64encode("robot$homelab+ecoflow-pull:${var.ecoflow_pull_robot_secret}")
+          }
+        }
+      }))
+    })
     reactive_resume = templatefile("${path.module}/manifests/reactive-resume.yaml", {
       reactive_resume_db_password        = var.reactive_resume_db_password
       reactive_resume_auth_secret        = var.reactive_resume_auth_secret
@@ -85,4 +102,10 @@ resource "kubectl_manifest" "apps" {
   ]
 
   yaml_body = each.value
+
+  # Don't block apply on the ecoflow Deployment rolling out: its image is built
+  # by GitLab CI *after* this apply creates the project + registry robots, so
+  # the pod is ImagePullBackOff until the first pipeline runs. Other apps keep
+  # the default rollout wait.
+  wait_for_rollout = !startswith(each.key, "ecoflow-")
 }

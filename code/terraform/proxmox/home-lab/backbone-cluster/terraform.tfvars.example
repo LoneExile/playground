@@ -69,3 +69,11 @@ harbor_secret_key     = "changeme16chars!"
 # GitLab — consumed by manifests/gitlab.yaml via apps.tf. Root password only
 # seeds on first boot.
 gitlab_root_password = "changeme"
+
+# EcoFlow monitor — consumed by manifests/ecoflow-monitor.yaml via apps.tf.
+ecoflow_email             = "you@example.com"
+ecoflow_password          = "changeme"
+
+gitlab_api_token          = "glpat-xxxxxxxxxxxxxxxxxxxx"
+ecoflow_ci_robot_secret   = "changeme-strong"
+ecoflow_pull_robot_secret = "changeme-strong"

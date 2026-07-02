@@ -281,6 +281,52 @@ variable "gitlab_ssh_ip" {
   default     = "10.0.10.213"
 }
 
+# --- EcoFlow monitor ---
+# Used by manifests/ecoflow-monitor.yaml (rendered via templatefile in apps.tf).
+# Go service that streams EcoFlow DELTA 3 telemetry and exposes /metrics for
+# Prometheus. Image is built by the project's GitLab CI (buildkit) and pushed
+# to Harbor; the cluster pulls it with a Harbor pull-robot credential.
+variable "ecoflow_email" {
+  description = "EcoFlow app account email (EF_EMAIL). Private app API login."
+  type        = string
+  sensitive   = true
+}
+
+variable "ecoflow_password" {
+  description = "EcoFlow app account password (EF_PASSWORD). Account must not have 2FA blocking password login."
+  type        = string
+  sensitive   = true
+}
+
+variable "ecoflow_image" {
+  description = "Container image ref for ecoflow-monitor (built + pushed by GitLab CI)."
+  type        = string
+  default     = "harbor.home.0dl.me/homelab/ecoflow-monitor:latest"
+}
+
+# --- CI/CD registration (GitLab + Harbor Terraform providers) ---
+# Manages the GitLab project, Harbor project + robots, and GitLab CI variables
+# so the whole pipeline is reproducible. Bootstrap order on a fresh cluster:
+# bring up GitLab + Harbor first, mint a root PAT, then set these and apply.
+variable "gitlab_api_token" {
+  description = "GitLab admin Personal Access Token (api scope) for the gitlab TF provider. Mint under the root user. Empty string disables the GitLab-managed resources (project + CI variables) so a fresh provision can boot GitLab before this is set."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "ecoflow_ci_robot_secret" {
+  description = "Secret set on the Harbor CI push-robot (robot$homelab+ecoflow-ci). You choose this value; TF pins it on the robot and wires it to the GitLab CI variable HARBOR_PASS. Must satisfy Harbor's policy: >=8 chars with upper+lower+digit."
+  type        = string
+  sensitive   = true
+}
+
+variable "ecoflow_pull_robot_secret" {
+  description = "Secret set on the Harbor pull-robot (robot$homelab+ecoflow-pull). You choose this value; TF pins it on the robot and builds the cluster imagePullSecret from it. Must satisfy Harbor's policy: >=8 chars with upper+lower+digit."
+  type        = string
+  sensitive   = true
+}
+
 # --- Inherit harmless 01-stage vars so shared terraform.tfvars doesn't error ---
 # Not used in this stage; declared only so Terraform doesn't complain about
 # "undeclared variable" when loading ../terraform.tfvars.

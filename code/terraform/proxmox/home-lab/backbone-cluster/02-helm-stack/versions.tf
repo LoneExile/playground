@@ -48,5 +48,13 @@ terraform {
       source  = "hashicorp/null"
       version = "~> 3.2"
     }
+    harbor = {
+      source  = "goharbor/harbor"
+      version = "~> 3.10"
+    }
+    gitlab = {
+      source  = "gitlabhq/gitlab"
+      version = "~> 17.0"
+    }
   }
 }

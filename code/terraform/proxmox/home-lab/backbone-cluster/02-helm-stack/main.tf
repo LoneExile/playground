@@ -32,6 +32,23 @@ provider "cloudflare" {
   api_token = var.cloudflare_api_token
 }
 
+# Harbor + GitLab providers manage the ecoflow-monitor CI/CD registration
+# (registry project + robots, git project + CI variables). They talk to the
+# in-cluster services over their LAN hostnames (valid wildcard TLS), so these
+# services must be up before their resources apply — enforced with depends_on
+# in cicd.tf. On a fresh cluster this is a later apply pass (services first).
+provider "harbor" {
+  url      = "https://harbor.${local.fqdn_base}"
+  username = "admin"
+  password = var.harbor_admin_password
+  insecure = false
+}
+
+provider "gitlab" {
+  base_url = "https://gitlab.${local.fqdn_base}/api/v4/"
+  token    = var.gitlab_api_token
+}
+
 # =============================================================================
 # Locals
 # =============================================================================
