@@ -266,6 +266,10 @@ resource "talos_machine_configuration_apply" "node" {
           }
           extraConfig = {
             maxPods = 512
+            # Graceful Node Shutdown: kubelet cleanly terminates pods on reboot/
+            # shutdown instead of leaving orphaned Failed/Completed pods behind.
+            shutdownGracePeriod             = "30s"
+            shutdownGracePeriodCriticalPods = "10s"
           }
         }
         sysctls = {
@@ -279,6 +283,10 @@ resource "talos_machine_configuration_apply" "node" {
         controllerManager = {
           extraArgs = {
             bind-address = "0.0.0.0"
+            # Auto-GC terminated (Failed/Succeeded) pods once >100 exist.
+            # Default is 12500, so orphaned pods left by node reboots/shutdowns
+            # linger indefinitely in a small cluster. Keeps ghost "Error" pods clean.
+            terminated-pod-gc-threshold = "100"
           }
         }
         scheduler = {
@@ -558,6 +566,10 @@ resource "talos_machine_configuration_apply" "worker" {
           clusterDNS = ["100.125.0.10"]
           extraConfig = {
             maxPods = 512
+            # Graceful Node Shutdown: kubelet cleanly terminates pods on reboot/
+            # shutdown instead of leaving orphaned Failed/Completed pods behind.
+            shutdownGracePeriod             = "30s"
+            shutdownGracePeriodCriticalPods = "10s"
           }
         }
         sysctls = {
@@ -585,7 +597,7 @@ locals {
 resource "talos_machine_configuration_apply" "pi_worker" {
   # No depends_on the bootstrap: the cluster is already running, so this worker
   # just joins. Avoids dragging the whole CP/VM/ISO chain into a -target apply.
-  client_configuration = talos_machine_secrets.this.client_configuration
+  client_configuration        = talos_machine_secrets.this.client_configuration
   machine_configuration_input = data.talos_machine_configuration.worker.machine_configuration
 
   # node = the Pi's static IP (set in the patch below). The very first apply used
@@ -653,6 +665,10 @@ resource "talos_machine_configuration_apply" "pi_worker" {
           clusterDNS = ["100.125.0.10"]
           extraConfig = {
             maxPods = 512
+            # Graceful Node Shutdown: kubelet cleanly terminates pods on reboot/
+            # shutdown instead of leaving orphaned Failed/Completed pods behind.
+            shutdownGracePeriod             = "30s"
+            shutdownGracePeriodCriticalPods = "10s"
           }
         }
         sysctls = {
