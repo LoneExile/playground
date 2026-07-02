@@ -42,6 +42,12 @@ variable "envoy_gateway_version" {
   default     = "1.5.0"
 }
 
+variable "kube_prometheus_stack_version" {
+  description = "kube-prometheus-stack chart version (packaged kube-prometheus: operator + Prometheus + Grafana)"
+  type        = string
+  default     = "87.5.0"
+}
+
 # --- Network ---
 variable "metallb_ip_range" {
   description = "MetalLB L2 IP pool (must be in cluster subnet)"
@@ -205,6 +211,14 @@ variable "reactive_resume_encryption_secret" {
 
 variable "reactive_resume_storage_secret_key" {
   description = "Minio root password = app STORAGE_SECRET_KEY. Must be >=8 chars. Generate with: openssl rand -base64 24"
+  type        = string
+  sensitive   = true
+}
+
+# --- Monitoring ---
+# Used by monitoring.tf (kube-prometheus-stack helm release).
+variable "grafana_admin_password" {
+  description = "Grafana 'admin' user password. Grafana is reachable at grafana.<subdomain>.<primary_domain>, so keep this strong. Generate with: openssl rand -base64 24. Only seeds the admin user on first boot — persistence is enabled, so the password lives in Grafana's sqlite DB afterwards. To actually rotate: kubectl -n monitoring exec deploy/kube-prometheus-stack-grafana -- grafana cli admin reset-admin-password <new>, then update terraform.tfvars to match."
   type        = string
   sensitive   = true
 }

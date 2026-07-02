@@ -39,6 +39,7 @@ locals {
   # Fully qualified hostnames per app.
   hostnames = {
     filebrowser = "files.${local.fqdn_base}"
+    grafana     = "grafana.${local.fqdn_base}"
     jellyfin    = "jellyfin.${local.fqdn_base}"
     qui         = "qui.${local.fqdn_base}"
     qbittorrent = "qbit.${local.fqdn_base}"
