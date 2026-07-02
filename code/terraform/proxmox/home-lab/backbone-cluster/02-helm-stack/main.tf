@@ -23,6 +23,9 @@ provider "helm" {
 provider "kubectl" {
   config_path      = var.kubeconfig_path
   load_config_file = true
+  # Multi-doc apps apply in parallel; a namespaced doc can race its own
+  # Namespace doc on first apply — retry instead of failing the run.
+  apply_retry_count = 3
 }
 
 provider "cloudflare" {
@@ -39,6 +42,7 @@ locals {
   # Fully qualified hostnames per app.
   hostnames = {
     filebrowser = "files.${local.fqdn_base}"
+    gitlab      = "gitlab.${local.fqdn_base}"
     grafana     = "grafana.${local.fqdn_base}"
     harbor      = "harbor.${local.fqdn_base}"
     jellyfin    = "jellyfin.${local.fqdn_base}"

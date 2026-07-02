@@ -65,3 +65,7 @@ grafana_admin_password = "changeme"
 harbor_admin_password = "changeme"
 harbor_db_password    = "changeme"
 harbor_secret_key     = "changeme16chars!"
+
+# GitLab — consumed by manifests/gitlab.yaml via apps.tf. Root password only
+# seeds on first boot.
+gitlab_root_password = "changeme"

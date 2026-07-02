@@ -254,6 +254,33 @@ variable "harbor_secret_key" {
   }
 }
 
+# --- GitLab ---
+# Used by manifests/gitlab.yaml (rendered via templatefile in apps.tf).
+variable "gitlab_root_password" {
+  description = "GitLab 'root' user password. Seeds the account on FIRST boot only (GITLAB_ROOT_PASSWORD); afterwards it lives in GitLab's Postgres — rotate in the UI (or gitlab-rails console) and update tfvars to match. Publicly browsable at gitlab.<primary_domain>, so keep this strong. Generate with: openssl rand -base64 18"
+  type        = string
+  sensitive   = true
+}
+
+variable "gitlab_runner_chart_version" {
+  description = "gitlab-runner helm chart version (0.90.x = runner 19.1.x; keep in step with the GitLab image)"
+  type        = string
+  default     = "0.90.1"
+}
+
+variable "gitlab_runner_token" {
+  description = "GitLab instance-runner authentication token (glrt-...). Empty disables the runner release (fresh provisions boot GitLab first). Mint via: kubectl -n gitlab exec deploy/gitlab -- gitlab-rails runner \"r = Ci::Runner.create!(runner_type: 'instance_type', description: 'k8s cluster runner', run_untagged: true); puts r.token\""
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "gitlab_ssh_ip" {
+  description = "Static MetalLB IP for the GitLab SSH LoadBalancer (must fall inside metallb_ip_range and match the annotation in manifests/gitlab.yaml). gitlab-ssh.<subdomain>.<primary_domain> A record points here."
+  type        = string
+  default     = "10.0.10.213"
+}
+
 # --- Inherit harmless 01-stage vars so shared terraform.tfvars doesn't error ---
 # Not used in this stage; declared only so Terraform doesn't complain about
 # "undeclared variable" when loading ../terraform.tfvars.

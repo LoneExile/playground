@@ -131,3 +131,16 @@ resource "cloudflare_record" "wildcard_home" {
   proxied = false
   comment = "backbone-cluster gateway (MetalLB). Managed by Terraform."
 }
+
+# GitLab SSH rides its own MetalLB IP (raw TCP can't use the HTTP gateway).
+# Explicit record beats the wildcard, so gitlab-ssh.home resolves to the SSH
+# LoadBalancer while gitlab.home stays on the gateway.
+resource "cloudflare_record" "gitlab_ssh" {
+  zone_id = data.cloudflare_zone.primary.id
+  name    = "gitlab-ssh.${var.subdomain}"
+  content = var.gitlab_ssh_ip
+  type    = "A"
+  ttl     = 300
+  proxied = false
+  comment = "GitLab SSH LoadBalancer (MetalLB). Managed by Terraform."
+}

@@ -37,6 +37,10 @@ locals {
     zennotes = templatefile("${path.module}/manifests/zennotes.yaml", {
       zennotes_auth_token = var.zennotes_auth_token
     })
+    gitlab = templatefile("${path.module}/manifests/gitlab.yaml", {
+      gitlab_root_password_b64 = base64encode(var.gitlab_root_password)
+      gitlab_ssh_ip            = var.gitlab_ssh_ip
+    })
     reactive_resume = templatefile("${path.module}/manifests/reactive-resume.yaml", {
       reactive_resume_db_password        = var.reactive_resume_db_password
       reactive_resume_auth_secret        = var.reactive_resume_auth_secret

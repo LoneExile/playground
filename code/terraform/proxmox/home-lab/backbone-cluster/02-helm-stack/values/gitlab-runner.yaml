@@ -1,0 +1,41 @@
+# GitLab Runner — kubernetes executor: each CI job runs as a pod in the
+# gitlab-runner namespace, scales to zero when idle.
+# Chart: https://charts.gitlab.io
+#
+# Talks to GitLab over the in-cluster Service (plain HTTP) — skips the
+# gateway/TLS hop entirely; clone_url keeps job checkouts on the same path.
+# Runner auth token is injected from Terraform (runner.tf).
+
+gitlabUrl: http://gitlab.gitlab.svc.cluster.local
+
+# Never unregister on pod stop — with glrt auth tokens that DELETES the runner
+# record in GitLab, so every config roll would brick the runner (403 on the
+# next pod's verify) until a new token is minted.
+unregisterRunners: false
+
+concurrent: 4
+checkInterval: 15
+
+rbac:
+  create: true
+
+resources:
+  requests: {cpu: 50m, memory: 128Mi}
+  limits: {memory: 256Mi}
+
+runners:
+  config: |
+    [[runners]]
+      url = "http://gitlab.gitlab.svc.cluster.local"
+      clone_url = "http://gitlab.gitlab.svc.cluster.local"
+      [runners.kubernetes]
+        namespace = "{{.Release.Namespace}}"
+        image = "alpine:3.21"
+        cpu_request = "100m"
+        memory_request = "128Mi"
+        memory_limit = "2Gi"
+      # Helper image tag is arch-specific (x86_64-vX.Y.Z, taken from the
+      # manager's arch) — a job pod scheduled on the arm64 worker can't pull
+      # it. Pin CI jobs to amd64 nodes.
+      [runners.kubernetes.node_selector]
+        "kubernetes.io/arch" = "amd64"
