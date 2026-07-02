@@ -7,7 +7,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 4,
   "refresh": "30s",
   "time": {
     "from": "now-6h",
@@ -90,7 +90,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pool_monitor_up",
+          "expr": "max(pool_monitor_up)",
           "legendFormat": "",
           "instant": true
         }
@@ -165,7 +165,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "zfs_pool_online",
+          "expr": "max by (pool) (zfs_pool_online)",
           "legendFormat": "{{pool}}",
           "instant": true
         }
@@ -247,7 +247,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "zfs_pool_has_errors",
+          "expr": "max by (pool) (zfs_pool_has_errors)",
           "legendFormat": "{{pool}}",
           "instant": true
         }
@@ -312,7 +312,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "zfs_pool_free_ratio * 100",
+          "expr": "max by (pool) (zfs_pool_free_ratio) * 100",
           "legendFormat": "{{pool}}",
           "instant": true
         }
@@ -376,7 +376,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "zfs_pool_fragmentation_percent",
+          "expr": "max by (pool) (zfs_pool_fragmentation_percent)",
           "legendFormat": "{{pool}}",
           "instant": true
         }
@@ -421,7 +421,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "zfs_pool_alloc_bytes",
+          "expr": "max by (pool) (zfs_pool_alloc_bytes)",
           "legendFormat": "{{pool}}",
           "instant": true
         }
@@ -467,7 +467,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "zfs_pool_size_bytes",
+          "expr": "max by (pool) (zfs_pool_size_bytes)",
           "legendFormat": "{{pool}}",
           "instant": true
         }
@@ -513,7 +513,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "zfs_pool_free_bytes",
+          "expr": "max by (pool) (zfs_pool_free_bytes)",
           "legendFormat": "{{pool}}",
           "instant": true
         }
@@ -564,7 +564,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "zfs_pool_alloc_bytes",
+          "expr": "max by (pool) (zfs_pool_alloc_bytes)",
           "legendFormat": "alloc {{pool}}",
           "instant": false
         },
@@ -574,7 +574,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "zfs_pool_size_bytes",
+          "expr": "max by (pool) (zfs_pool_size_bytes)",
           "legendFormat": "size {{pool}}",
           "instant": false
         }
@@ -622,7 +622,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "proxmox_disk_temperature_celsius",
+          "expr": "max by (devpath) (proxmox_disk_temperature_celsius)",
           "legendFormat": "{{devpath}}",
           "instant": false
         }
@@ -707,7 +707,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "proxmox_disk_smart_healthy",
+          "expr": "max by (devpath) (proxmox_disk_smart_healthy)",
           "legendFormat": "{{devpath}}",
           "instant": true
         }
@@ -770,7 +770,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "proxmox_disk_wearout_percent",
+          "expr": "max by (devpath) (proxmox_disk_wearout_percent)",
           "legendFormat": "{{devpath}}",
           "instant": true
         }
@@ -816,7 +816,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "proxmox_disk_power_on_hours",
+          "expr": "max by (devpath) (proxmox_disk_power_on_hours)",
           "legendFormat": "{{devpath}}",
           "instant": true
         }
@@ -862,7 +862,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "node_uptime_seconds",
+          "expr": "max(node_uptime_seconds)",
           "legendFormat": "",
           "instant": true
         }
@@ -927,7 +927,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "node_cpu_usage_ratio * 100",
+          "expr": "max(node_cpu_usage_ratio) * 100",
           "legendFormat": "cpu",
           "instant": true
         }
@@ -991,7 +991,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "node_memory_used_ratio * 100",
+          "expr": "max(node_memory_used_ratio) * 100",
           "legendFormat": "mem",
           "instant": true
         }
@@ -1055,7 +1055,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "node_rootfs_used_ratio * 100",
+          "expr": "max(node_rootfs_used_ratio) * 100",
           "legendFormat": "rootfs",
           "instant": true
         }
@@ -1343,6 +1343,166 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Disk",
+            "desc": false
+          }
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "HDD Bad-Sector Health",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "panels": []
+    },
+    {
+      "id": 23,
+      "type": "table",
+      "title": "HDD Health \u2014 bad sectors",
+      "description": "HDD SMART bad-sector counters. 0 = healthy (green); any non-zero (red) means reallocated/pending/uncorrectable sectors \u2014 the drive is degrading or failing. SSDs report wear differently and don't appear here.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (devpath) (proxmox_disk_smart_attribute{attribute=\"reallocated_sector_ct\"})",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (devpath) (proxmox_disk_smart_attribute{attribute=\"current_pending_sector\"})",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (devpath) (proxmox_disk_smart_attribute{attribute=\"offline_uncorrectable\"})",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (devpath) (proxmox_disk_smart_attribute{attribute=\"reported_uncorrect\"})",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "devpath",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true
+            },
+            "renameByName": {
+              "devpath": "Disk",
+              "Value #A": "Reallocated",
+              "Value #B": "Pending",
+              "Value #C": "Offline-Uncorrectable",
+              "Value #D": "Reported-Uncorrectable"
+            },
+            "indexByName": {
+              "devpath": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "color-background"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Disk"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
                 }
               }
             ]
