@@ -118,9 +118,12 @@ spec:
                 # useless, per-IP throttles would bucket the whole internet as
                 # one client, and the monitoring endpoints below would be
                 # reachable through the gateway from anywhere.
-                gitlab_rails['trusted_proxies'] = ['100.124.0.0/16']
+                # 10.0.10.166 = cloudflared host — trusted so tunnel visitors
+                # resolve to their real public IP (and get 403 from the
+                # monitoring endpoints below) instead of appearing as a LAN IP
+                gitlab_rails['trusted_proxies'] = ['100.124.0.0/16', '10.0.10.166/32']
                 nginx['real_ip_header'] = 'X-Forwarded-For'
-                nginx['real_ip_trusted_addresses'] = ['100.124.0.0/16']
+                nginx['real_ip_trusted_addresses'] = ['100.124.0.0/16', '10.0.10.166/32']
                 nginx['real_ip_recursive'] = 'on'
                 # kubelet probes come from the node net / cilium_host pod-CIDR
                 # IP; readiness endpoints are localhost-only by default
