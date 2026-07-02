@@ -59,3 +59,9 @@ siyuan_access_auth_code = "changeme"
 # grafana.<subdomain>.<primary_domain>, so keep this strong.
 # Generate with `openssl rand -base64 24`.
 grafana_admin_password = "changeme"
+
+# Harbor — consumed by 02-helm-stack/harbor.tf. Admin password only seeds
+# before first boot; secret_key must be exactly 16 chars (openssl rand -hex 8).
+harbor_admin_password = "changeme"
+harbor_db_password    = "changeme"
+harbor_secret_key     = "changeme16chars!"

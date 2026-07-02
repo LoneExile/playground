@@ -48,6 +48,12 @@ variable "kube_prometheus_stack_version" {
   default     = "87.5.0"
 }
 
+variable "harbor_chart_version" {
+  description = "Harbor helm chart version (chart 1.19.x = Harbor 2.15.x)"
+  type        = string
+  default     = "1.19.1"
+}
+
 # --- Network ---
 variable "metallb_ip_range" {
   description = "MetalLB L2 IP pool (must be in cluster subnet)"
@@ -221,6 +227,31 @@ variable "grafana_admin_password" {
   description = "Grafana 'admin' user password. Grafana is reachable at grafana.<subdomain>.<primary_domain>, so keep this strong. Generate with: openssl rand -base64 24. Only seeds the admin user on first boot — persistence is enabled, so the password lives in Grafana's sqlite DB afterwards. To actually rotate: kubectl -n monitoring exec deploy/kube-prometheus-stack-grafana -- grafana cli admin reset-admin-password <new>, then update terraform.tfvars to match."
   type        = string
   sensitive   = true
+}
+
+# --- Harbor ---
+# Used by harbor.tf (harbor helm release).
+variable "harbor_admin_password" {
+  description = "Harbor 'admin' user password. Publicly browsable at harbor.<primary_domain>, so keep this strong. Generate with: openssl rand -base64 18. Rotating via tfvars only works before first boot; afterwards change it in the UI (or via API) and update tfvars to match."
+  type        = string
+  sensitive   = true
+}
+
+variable "harbor_db_password" {
+  description = "Password for Harbor's internal Postgres. Set by initdb on first boot; consumed by core/jobservice/registry. Generate with: openssl rand -base64 24. NOTE: the DB StatefulSet PVC survives helm uninstall/terraform destroy — on re-provision with a different value, initdb is skipped and core crashloops on auth failure; delete the retained PVC (or keep the old password) when intentionally reprovisioning."
+  type        = string
+  sensitive   = true
+}
+
+variable "harbor_secret_key" {
+  description = "Harbor secretKey — encrypts stored remote-registry credentials. MUST be exactly 16 characters. Generate with: openssl rand -hex 8. Changing it orphans previously-encrypted credentials."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.harbor_secret_key) == 16
+    error_message = "harbor_secret_key must be exactly 16 characters (e.g. openssl rand -hex 8)."
+  }
 }
 
 # --- Inherit harmless 01-stage vars so shared terraform.tfvars doesn't error ---
