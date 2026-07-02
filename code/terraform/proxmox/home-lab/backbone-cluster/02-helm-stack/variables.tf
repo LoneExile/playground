@@ -327,6 +327,41 @@ variable "ecoflow_pull_robot_secret" {
   sensitive   = true
 }
 
+# --- pool-monitor (Proxmox ZFS pool + disk health monitor) -------------------
+variable "pool_image" {
+  description = "Container image ref for pool-monitor (built + pushed by GitLab CI)."
+  type        = string
+  default     = "harbor.home.0dl.me/homelab/pool-monitor:latest"
+}
+variable "pool_ci_robot_secret" {
+  description = "Secret on the Harbor CI push-robot (robot$homelab+pool-ci). TF pins it on the robot and wires it to GitLab CI HARBOR_PASS. Must satisfy Harbor's policy: >=8 chars with upper+lower+digit."
+  type        = string
+  sensitive   = true
+}
+variable "pool_pull_robot_secret" {
+  description = "Secret on the Harbor pull-robot (robot$homelab+pool-pull). TF pins it and builds the cluster imagePullSecret. Must satisfy Harbor's policy: >=8 chars with upper+lower+digit."
+  type        = string
+  sensitive   = true
+}
+# Proxmox target for pool-monitor. Defaults to the NAS host (holds zpool1). The
+# token secret reuses proxmox_api_token_secret_nas (already in tfvars); a
+# read-only PVEAuditor token is sufficient in production.
+variable "pool_pve_host" {
+  description = "Proxmox host/IP pool-monitor polls."
+  type        = string
+  default     = "192.168.1.179"
+}
+variable "pool_pve_node" {
+  description = "Proxmox node name pool-monitor polls."
+  type        = string
+  default     = "proxmox"
+}
+variable "pool_pve_token_id" {
+  description = "Proxmox API token id for pool-monitor (secret via proxmox_api_token_secret_nas)."
+  type        = string
+  default     = "root@pam!terraform"
+}
+
 # --- Inherit harmless 01-stage vars so shared terraform.tfvars doesn't error ---
 # Not used in this stage; declared only so Terraform doesn't complain about
 # "undeclared variable" when loading ../terraform.tfvars.

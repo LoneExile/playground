@@ -1,0 +1,161 @@
+# pool-monitor — Go service polling the Proxmox VE API for ZFS pool + disk SMART
+# + node health, exposing /metrics for Prometheus and /state as JSON. Image is
+# built by the project's GitLab CI (rootless buildkit) and pushed to Harbor;
+# pulled here with a Harbor pull-robot credential (imagePullSecret below).
+#
+# Secrets: the Proxmox API-token secret comes from the Secret via the
+# PVE_TOKEN_SECRET env var (read directly by the app). token_id/host/node are
+# non-secret and rendered into the ConfigMap by Terraform.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pool-monitor
+  labels:
+    # distroless nonroot image, no caps, no host access — clears restricted PSA.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pool-monitor-secrets
+  namespace: pool-monitor
+type: Opaque
+data:
+  PVE_TOKEN_SECRET: ${pve_token_secret_b64}
+---
+# Harbor pull-robot docker credential for the private image.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pool-harbor-pull
+  namespace: pool-monitor
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: ${harbor_pull_dockerconfig_b64}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pool-monitor-config
+  namespace: pool-monitor
+data:
+  config.yaml: |
+    proxmox:
+      host: ${pve_host}
+      port: 8006
+      node: ${pve_node}
+      token_id: "${pve_token_id}"   # secret from PVE_TOKEN_SECRET env
+      insecure_skip_tls: true        # Proxmox self-signed cert
+      poll_interval: 30s
+      smart: true
+      smart_interval: 5m
+      node_status: true
+    http:
+      addr: ":8081"
+    log:
+      level: info
+    rules: []                        # webhook rules disabled in-cluster
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pool-monitor
+  namespace: pool-monitor
+  labels: {app: pool-monitor}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: pool-monitor}
+  template:
+    metadata:
+      labels: {app: pool-monitor}
+    spec:
+      # image is built amd64 by the CI runner (pinned amd64) — schedule to match
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      imagePullSecrets:
+        - name: pool-harbor-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532            # distroless nonroot uid
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: pool-monitor
+          image: ${pool_image}
+          imagePullPolicy: Always   # :latest tag — pull newest on (re)start
+          ports:
+            - {name: http, containerPort: 8081}
+          env:
+            - name: PVE_TOKEN_SECRET
+              valueFrom: {secretKeyRef: {name: pool-monitor-secrets, key: PVE_TOKEN_SECRET}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          volumeMounts:
+            - {name: config, mountPath: /app/config.yaml, subPath: config.yaml}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8081}
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8081}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap: {name: pool-monitor-config}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pool-monitor
+  namespace: pool-monitor
+  labels: {app: pool-monitor}
+spec:
+  type: ClusterIP
+  selector: {app: pool-monitor}
+  ports:
+    - {name: http, port: 8081, targetPort: http}
+---
+# Prometheus scrape — kube-prometheus-stack picks up ServiceMonitors from all
+# namespaces (serviceMonitorSelectorNilUsesHelmValues: false).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pool-monitor
+  namespace: pool-monitor
+  labels:
+    app: pool-monitor
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels: {app: pool-monitor}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+# LAN view of the JSON API + metrics at pool.home.0dl.me (wildcard cert).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: pool-monitor
+  namespace: pool-monitor
+spec:
+  parentRefs:
+    - name: backbone-gateway
+      namespace: gateway-system
+      sectionName: https-wildcard
+  hostnames:
+    - pool.home.0dl.me
+  rules:
+    - backendRefs:
+        - name: pool-monitor
+          port: 8081

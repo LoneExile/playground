@@ -58,6 +58,23 @@ locals {
         }
       }))
     })
+    pool = templatefile("${path.module}/manifests/pool-monitor.yaml", {
+      pool_image           = var.pool_image
+      pve_host             = var.pool_pve_host
+      pve_node             = var.pool_pve_node
+      pve_token_id         = var.pool_pve_token_id
+      pve_token_secret_b64 = base64encode(var.proxmox_api_token_secret_nas)
+      # Harbor pull-robot credential — deterministic robot name + tfvars secret,
+      # referenced literally (not via the resource) to avoid a dependency cycle
+      # through the helm_release chain. Robot created in cicd-pool.tf.
+      harbor_pull_dockerconfig_b64 = base64encode(jsonencode({
+        auths = {
+          "harbor.${local.fqdn_base}" = {
+            auth = base64encode("robot$homelab+pool-pull:${var.pool_pull_robot_secret}")
+          }
+        }
+      }))
+    })
     reactive_resume = templatefile("${path.module}/manifests/reactive-resume.yaml", {
       reactive_resume_db_password        = var.reactive_resume_db_password
       reactive_resume_auth_secret        = var.reactive_resume_auth_secret
@@ -103,9 +120,9 @@ resource "kubectl_manifest" "apps" {
 
   yaml_body = each.value
 
-  # Don't block apply on the ecoflow Deployment rolling out: its image is built
-  # by GitLab CI *after* this apply creates the project + registry robots, so
-  # the pod is ImagePullBackOff until the first pipeline runs. Other apps keep
-  # the default rollout wait.
-  wait_for_rollout = !startswith(each.key, "ecoflow-")
+  # Don't block apply on the ecoflow/pool Deployments rolling out: their images
+  # are built by GitLab CI *after* this apply creates the project + registry
+  # robots, so the pod is ImagePullBackOff until the first pipeline runs. Other
+  # apps keep the default rollout wait.
+  wait_for_rollout = !startswith(each.key, "ecoflow-") && !startswith(each.key, "pool-")
 }
