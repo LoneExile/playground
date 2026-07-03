@@ -1,0 +1,63 @@
+# Alertmanager routing — merged into kube-prometheus-stack.yaml as a second Helm
+# values layer (monitoring.tf) so the webhook secret stays OUT of the committed
+# base values file. Rendered by templatefile(): ${hermes_webhook_url} and
+# ${hermes_webhook_secret} come from tfvars (gitignored).
+#
+# Flow: Prometheus rule fires -> Alertmanager groups it -> POST to the hermes
+# agent's webhook (10.0.10.29:8644). Hermes runs the payload through an LLM with
+# homelab context and delivers a plain-language "what fired / root cause / fix"
+# message to Telegram. See manifests/alert-rules.yaml for the rules.
+#
+# Auth: hermes requires a secret and accepts a plain static token in the
+# X-Gitlab-Token header (constant-time compared). Alertmanager can't sign the
+# body (no shared-HMAC support), so the static header is the native path. This
+# needs Alertmanager >= v0.27 (http_config.http_headers); the cluster runs
+# v0.33.
+alertmanager:
+  config:
+    global:
+      resolve_timeout: 5m
+
+    # Default drop everything to the null sink; only real problems
+    # (severity critical|warning) are forwarded to hermes. Keeps the noisy
+    # default kube-prometheus-stack info alerts and the always-on Watchdog off
+    # Telegram.
+    route:
+      receiver: "null"
+      group_by: ["alertname", "severity"]
+      group_wait: 45s
+      group_interval: 5m
+      repeat_interval: 12h
+      routes:
+        - receiver: "null"
+          matchers:
+            - alertname = "Watchdog"
+        - receiver: "null"
+          matchers:
+            - alertname = "InfoInhibitor"
+        - receiver: hermes-telegram
+          matchers:
+            - severity =~ "critical|warning"
+
+    receivers:
+      - name: "null"
+      - name: hermes-telegram
+        webhook_configs:
+          - url: "${hermes_webhook_url}"
+            send_resolved: true
+            max_alerts: 0
+            http_config:
+              http_headers:
+                X-Gitlab-Token:
+                  values:
+                    - "${hermes_webhook_secret}"
+
+    # When a disk/pool/node throws a critical, suppress the paired warning for
+    # the same entity so Telegram gets one message, not two.
+    inhibit_rules:
+      - source_matchers: ["severity = critical"]
+        target_matchers: ["severity = warning"]
+        equal: ["alertname", "devpath", "pool", "instance"]
+
+    templates:
+      - /etc/alertmanager/config/*.tmpl

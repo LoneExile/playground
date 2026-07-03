@@ -1,0 +1,181 @@
+# Homelab alert rules for pool-monitor (Proxmox ZFS/SMART/node) and
+# ecoflow-monitor. The kube-prometheus-stack Prometheus is configured with
+# ruleSelectorNilUsesHelmValues=false, so it picks up every PrometheusRule in
+# the cluster — no special labels needed. Alerts carry a severity of
+# critical|warning; Alertmanager forwards those to the hermes webhook -> Telegram
+# (values/kube-prometheus-stack-alerting.yaml.tftpl).
+#
+# Thresholds were calibrated against live values (2026-07): pool healthy, nvme
+# temp ~57C, node mem ~0.82, so none of the "capacity/temp/health" rules false-
+# fire. The bad-sector rules DO fire immediately for /dev/sdc and /dev/sdd —
+# both have pending/uncorrectable sectors while SMART still reports PASSED, which
+# is exactly the silent-failure case plain SMART health misses.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: homelab-pool-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: homelab
+    role: alert-rules
+spec:
+  groups:
+    # ── Exporter / monitor liveness ────────────────────────────────
+    - name: homelab.monitor
+      rules:
+        - alert: PoolMonitorPollFailing
+          expr: pool_monitor_up == 0
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: "pool-monitor cannot poll Proxmox"
+            description: "pool_monitor_up=0 for 5m — the last Proxmox VE API poll failed. ZFS/disk health is stale. Check the pool-monitor pod logs and the Proxmox API token."
+        - alert: PoolMonitorAbsent
+          expr: absent(pool_monitor_up)
+          for: 10m
+          labels: {severity: critical}
+          annotations:
+            summary: "pool-monitor metric absent (exporter down)"
+            description: "No pool_monitor_up series for 10m — the pool-monitor pod is likely down or its ServiceMonitor stopped being scraped. `kubectl -n pool-monitor get pods`."
+        - alert: EcoflowMonitorDown
+          expr: ecoflow_up == 0
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: "ecoflow-monitor lost the device"
+            description: "ecoflow_up=0 for 10m on {{ $labels.name }} — the monitor can't reach the EcoFlow cloud/device. Check credentials and connectivity."
+        # NOTE: no time-based staleness alert. An idle EcoFlow (stable SoC, no
+        # load) legitimately stops pushing MQTT updates for hours, so
+        # last_update age is a poor liveness signal and false-fires. ecoflow_up
+        # is the real health signal.
+
+    # ── ZFS pool health ────────────────────────────────────────────
+    - name: homelab.zfs
+      rules:
+        - alert: ZfsPoolNotOnline
+          expr: zfs_pool_online == 0
+          for: 2m
+          labels: {severity: critical}
+          annotations:
+            summary: "ZFS pool {{ $labels.pool }} is not ONLINE"
+            description: "Pool {{ $labels.pool }} health is not ONLINE (DEGRADED/FAULTED). Run `zpool status {{ $labels.pool }}` on the Proxmox host and check the member disks."
+        - alert: ZfsPoolErrors
+          expr: zfs_pool_has_errors == 1
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: "ZFS pool {{ $labels.pool }} reports errors"
+            description: "Pool {{ $labels.pool }} has read/write/checksum or device errors. `zpool status -v {{ $labels.pool }}`; a scrub + disk check is warranted."
+        - alert: ZfsDeviceNotOnline
+          expr: zfs_device_online == 0
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: "ZFS device {{ $labels.device }} in {{ $labels.pool }} not ONLINE"
+            description: "Device {{ $labels.device }} (state {{ $labels.state }}) in pool {{ $labels.pool }} left ONLINE. Check the disk; the pool may be running degraded."
+        - alert: ZfsPoolLowFree
+          expr: zfs_pool_free_ratio < 0.10
+          for: 30m
+          labels: {severity: warning}
+          annotations:
+            summary: "ZFS pool {{ $labels.pool }} low on free space"
+            description: "Pool {{ $labels.pool }} is under 10% free for 30m. ZFS degrades badly when near-full — free space or expand."
+
+    # ── Physical disk / SMART ──────────────────────────────────────
+    - name: homelab.disk
+      rules:
+        # The important one: SMART overall-health can still say PASSED while a
+        # disk quietly accumulates unreadable sectors. Pending/uncorrectable
+        # sectors mean active data-loss risk.
+        - alert: DiskUncorrectableSectors
+          expr: proxmox_disk_smart_attribute{attribute=~"current_pending_sector|offline_uncorrectable|reported_uncorrect"} > 0
+          for: 15m
+          labels: {severity: critical}
+          annotations:
+            summary: "Disk {{ $labels.devpath }} has unreadable sectors ({{ $labels.attribute }})"
+            description: "{{ $labels.devpath }} reports {{ $value }} {{ $labels.attribute }} — sectors that can't be read/remapped. SMART may still say PASSED. Back up any data on it and plan a replacement; do NOT add it to a pool."
+        - alert: DiskReallocatedSectors
+          expr: proxmox_disk_smart_attribute{attribute="reallocated_sector_ct"} > 0
+          for: 30m
+          labels: {severity: warning}
+          annotations:
+            summary: "Disk {{ $labels.devpath }} has reallocated sectors"
+            description: "{{ $labels.devpath }} has remapped {{ $value }} bad sectors. A few is tolerable; a rising count means the drive is wearing out. Watch it and keep backups current."
+        - alert: DiskCrcErrors
+          expr: proxmox_disk_smart_attribute{attribute="udma_crc_error_count"} > 0
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: "Disk {{ $labels.devpath }} UDMA CRC errors"
+            description: "{{ $labels.devpath }} has {{ $value }} interface CRC errors — usually a bad SATA cable or loose connection, not the platter. Reseat/replace the cable."
+        - alert: DiskSmartFailed
+          expr: proxmox_disk_smart_healthy == 0
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: "Disk {{ $labels.devpath }} SMART health FAILED"
+            description: "{{ $labels.devpath }} ({{ $labels.model }}) overall SMART health is not PASSED. Failure is imminent — replace it."
+        - alert: DiskWearoutHigh
+          expr: proxmox_disk_wearout_percent > 80
+          for: 1h
+          labels: {severity: warning}
+          annotations:
+            summary: "SSD {{ $labels.devpath }} wear high"
+            description: "{{ $labels.devpath }} is at {{ $value }}% of rated write endurance used. Plan a replacement before it hits 100%."
+        - alert: DiskTemperatureHigh
+          expr: proxmox_disk_temperature_celsius > 60
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: "Disk {{ $labels.devpath }} running hot"
+            description: "{{ $labels.devpath }} at {{ $value }}C for 15m. Check airflow/fans; sustained heat shortens disk life."
+        - alert: DiskTemperatureCritical
+          expr: proxmox_disk_temperature_celsius > 70
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: "Disk {{ $labels.devpath }} overheating"
+            description: "{{ $labels.devpath }} at {{ $value }}C — above safe limits. Improve cooling now to avoid thermal damage/throttling."
+
+    # ── Node (Proxmox host) ────────────────────────────────────────
+    - name: homelab.node
+      rules:
+        - alert: NodeMemoryHigh
+          expr: node_memory_used_ratio > 0.92
+          for: 20m
+          labels: {severity: warning}
+          annotations:
+            summary: "Proxmox host memory high"
+            description: "Host RAM at {{ $value | humanizePercentage }} for 20m. Check for a runaway VM/container or oversized ARC."
+        - alert: NodeRootfsHigh
+          expr: node_rootfs_used_ratio > 0.90
+          for: 20m
+          labels: {severity: warning}
+          annotations:
+            summary: "Proxmox host root filesystem filling"
+            description: "Host rootfs at {{ $value | humanizePercentage }}. Clear old logs/ISOs/backups before it hits 100% and wedges the host."
+        - alert: NodeRootfsCritical
+          expr: node_rootfs_used_ratio > 0.96
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: "Proxmox host root filesystem almost full"
+            description: "Host rootfs at {{ $value | humanizePercentage }} — imminent risk of a read-only/wedged host. Free space now."
+
+    # ── Power (EcoFlow battery) ────────────────────────────────────
+    - name: homelab.power
+      rules:
+        - alert: EcoflowBatteryLow
+          expr: ecoflow_battery_soc_percent < 20
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: "EcoFlow {{ $labels.name }} battery low"
+            description: "{{ $labels.name }} at {{ $value }}% SoC. If it's backing anything important, check the input/charging source."
+        - alert: EcoflowBatteryCritical
+          expr: ecoflow_battery_soc_percent < 8
+          for: 2m
+          labels: {severity: critical}
+          annotations:
+            summary: "EcoFlow {{ $labels.name }} battery critically low"
+            description: "{{ $labels.name }} at {{ $value }}% SoC — about to cut off. Anything on battery is about to lose power."

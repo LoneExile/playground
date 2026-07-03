@@ -229,6 +229,23 @@ variable "grafana_admin_password" {
   sensitive   = true
 }
 
+# Alertmanager -> hermes-agent webhook -> Telegram. When a PrometheusRule
+# (manifests/alert-rules.yaml) fires, Alertmanager POSTs to the hermes agent,
+# which runs the payload through an LLM with homelab context and messages
+# Telegram in plain language. Wired in monitoring.tf via the templated values
+# file values/kube-prometheus-stack-alerting.yaml.tftpl.
+variable "hermes_webhook_url" {
+  description = "hermes-agent webhook endpoint for Alertmanager. The route name is the last path segment (subscribed on hermes: `hermes webhook subscribe pool-alerts --deliver telegram ...`). Reachable from cluster pods over the LAN."
+  type        = string
+  default     = "http://10.0.10.29:8644/webhooks/pool-alerts"
+}
+
+variable "hermes_webhook_secret" {
+  description = "Static shared secret for the hermes webhook. Sent by Alertmanager in the X-Gitlab-Token header and constant-time compared by hermes (gateway/platforms/webhook.py). Must equal the `secret` on the hermes subscription (~/.hermes/webhook_subscriptions.json). Generate with: openssl rand -hex 24."
+  type        = string
+  sensitive   = true
+}
+
 # --- Harbor ---
 # Used by harbor.tf (harbor helm release).
 variable "harbor_admin_password" {

@@ -24,7 +24,15 @@ resource "helm_release" "kube_prometheus_stack" {
   wait             = true
   timeout          = 900 # CRDs + operator + Prometheus/Grafana image pulls
 
-  values = [file("${path.module}/values/kube-prometheus-stack.yaml")]
+  # Base values, then an alerting layer that injects the Alertmanager route +
+  # hermes webhook receiver (secret kept out of the committed base file).
+  values = [
+    file("${path.module}/values/kube-prometheus-stack.yaml"),
+    templatefile("${path.module}/values/kube-prometheus-stack-alerting.yaml.tftpl", {
+      hermes_webhook_url    = var.hermes_webhook_url
+      hermes_webhook_secret = var.hermes_webhook_secret
+    }),
+  ]
 
   # Canonical URL = the public tunnel hostname (grafana.<primary_domain>);
   # the LAN name (grafana.<fqdn_base>) still serves fine, but absolute links
