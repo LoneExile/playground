@@ -1,0 +1,96 @@
+# Official OpenBao chart values (openbao 0.28.x / OpenBao v2.5.x).
+# Standalone single-node with the `file` storage backend on NFS. Fronted by our
+# own Gateway API HTTPRoutes (openbao.tf); TLS terminates at the edge so the
+# OpenBao listener runs plain HTTP (tls_disable = 1).
+#
+# NFS data comes from manifests/openbao-nfs.yaml (PVC openbao-nas), mounted at
+# /openbao/data via server.volumes/volumeMounts with subPath config/openbao/data.
+
+global:
+  enabled: true
+
+# No Kubernetes secret-injection sidecar — this is a standalone secrets store.
+injector:
+  enabled: false
+
+server:
+  # Run as the openbao user (uid 100 / gid 1000). fsGroup + the chown
+  # initContainer make the NFS subtree writable (fsGroup alone is unreliable on
+  # NFS, so we chown explicitly like the other NFS apps).
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      runAsUser: 100
+      runAsGroup: 1000
+      fsGroup: 1000
+
+  extraInitContainers:
+    - name: nfs-perms
+      image: busybox:1.36
+      command: ["sh", "-c", "chown -R 100:1000 /openbao/data && chmod 700 /openbao/data"]
+      securityContext:
+        # Override the pod-level runAsNonRoot:true so this chown can run as root.
+        runAsNonRoot: false
+        runAsUser: 0
+      volumeMounts:
+        - name: nas
+          mountPath: /openbao/data
+          subPath: config/openbao/data
+
+  # Chart-managed PVCs off — we bring the shared NFS PV instead.
+  dataStorage:
+    enabled: false
+  auditStorage:
+    enabled: false
+
+  # Attach the NFS-at-root PVC; subPath scopes it to config/openbao/data.
+  volumes:
+    - name: nas
+      persistentVolumeClaim:
+        claimName: openbao-nas
+  volumeMounts:
+    - name: nas
+      mountPath: /openbao/data
+      subPath: config/openbao/data
+
+  # Readiness via the HTTP health endpoint, with sealed/uninitialised treated as
+  # "ready" (sealedcode/uninitcode = 200). The chart's default exec probe
+  # (`bao status`) fails while sealed, which leaves the EndpointSlice
+  # serving=false — and Cilium's Gateway/Envoy builds upstreams from the
+  # `serving` condition, so a sealed pod gets zero healthy upstreams and the
+  # route returns 500. publishNotReadyAddresses can force ready=true but NOT
+  # serving=true, so it doesn't help. Reporting ready while sealed keeps the
+  # pod routable so the UI/API are reachable for the one-time init + every
+  # post-restart unseal. tls_disable=1 → HTTP scheme (chart default).
+  readinessProbe:
+    enabled: true
+    path: "/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200"
+    port: 8200
+
+  standalone:
+    enabled: true
+    config: |
+      ui = true
+      disable_mlock = true
+
+      listener "tcp" {
+        tls_disable     = 1
+        address         = "[::]:8200"
+        cluster_address = "[::]:8201"
+      }
+
+      storage "file" {
+        path = "/openbao/data"
+      }
+
+  ha:
+    enabled: false
+
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits:   {memory: 512Mi}
+
+# UI is enabled in the server config above (ui = true) and served on the main
+# server Service :8200; no separate UI LoadBalancer service.
+ui:
+  enabled: false

@@ -1,0 +1,45 @@
+# OpenBao namespace + NFS storage. OpenBao itself is the official openbao Helm
+# chart (openbao.tf); this manifest provides the namespace and the static NFS PV
+# whose data subtree the chart mounts. No secrets here — OpenBao's root token +
+# unseal keys are produced at `init` time (manual, one-time; see openbao.tf).
+#
+# NFS layout (192.168.1.179:/zpool1/nfs_share) — one-PV-at-root + subPath, same
+# pattern as keycloak/reactive-resume:
+#   config/openbao/data → /openbao/data  (file storage backend, uid 100 gid 1000)
+#
+# Baseline PSA is enough: mlock is disabled in the OpenBao config (no IPC_LOCK
+# capability), and the only root usage is a chown initContainer.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openbao
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: openbao-nas
+spec:
+  capacity: {storage: 10Gi}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions: [nfsvers=4.1, nolock, noatime]
+  nfs:
+    server: 192.168.1.179
+    path: /zpool1/nfs_share
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openbao-nas
+  namespace: openbao
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: openbao-nas
+  resources:
+    requests: {storage: 10Gi}

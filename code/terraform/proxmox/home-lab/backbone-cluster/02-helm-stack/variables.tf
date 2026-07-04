@@ -266,6 +266,16 @@ variable "keycloak_db_password" {
   sensitive   = true
 }
 
+# --- OpenBao ---
+# Used by openbao.tf (official openbao Helm chart). No secrets var: OpenBao's
+# root token + unseal keys are produced at `bao operator init` time (manual,
+# one-time) and are NOT managed by Terraform.
+variable "openbao_chart_version" {
+  description = "Official openbao Helm chart version. See https://github.com/openbao/openbao-helm/releases."
+  type        = string
+  default     = "0.28.4"
+}
+
 # --- Harbor ---
 # Used by harbor.tf (harbor helm release).
 variable "harbor_admin_password" {
