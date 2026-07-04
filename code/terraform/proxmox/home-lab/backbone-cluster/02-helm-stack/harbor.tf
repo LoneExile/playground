@@ -10,8 +10,8 @@
 resource "helm_release" "harbor" {
   depends_on = [
     time_sleep.wait_for_gateway,
-    helm_release.nfs_subdir_provisioner,  # registry/db/redis/trivy PVCs
-    helm_release.kube_prometheus_stack,   # ServiceMonitor CRD must exist first
+    helm_release.nfs_subdir_provisioner, # registry/db/redis/trivy PVCs
+    helm_release.kube_prometheus_stack,  # ServiceMonitor CRD must exist first
   ]
 
   name             = "harbor"
@@ -44,6 +44,37 @@ resource "helm_release" "harbor" {
     name  = "secretKey"
     value = var.harbor_secret_key
   }
+}
+
+# OIDC SSO via Keycloak (homelab realm). This is an INSTANCE-WIDE switch:
+# auth_mode=oidc_auth routes all non-admin auth through Keycloak. The built-in
+# `admin` still authenticates against Harbor's DB (so the harbor TF provider and
+# UI admin login keep working — break-glass). Human users must use their per-user
+# CLI secret (UI → profile) for `docker login` afterwards; robots are unaffected.
+#
+# Client + `groups` claim mapper are in keycloak-clients.tf; members of the
+# Keycloak `harbor-admins` group become Harbor admins (oidc_admin_group). Harbor
+# derives redirect_uri from externalURL (the LAN host), so OIDC login completes
+# on harbor.home.0dl.me only.
+#
+# NOTE (lock-to-me caveat): oidc_auto_onboard onboards ANY homelab-realm user who
+# logs in — the realm's GitHub IdP is unrestricted, so the durable gate is a
+# realm-level user restriction (see the ZenNote). Pre-switch, Harbor refuses
+# oidc_auth if any local DB user other than `admin` exists.
+resource "harbor_config_auth" "oidc" {
+  depends_on = [helm_release.harbor]
+
+  auth_mode          = "oidc_auth"
+  oidc_name          = "keycloak"
+  oidc_endpoint      = "https://keycloak.${var.primary_domain}/realms/homelab"
+  oidc_client_id     = keycloak_openid_client.harbor.client_id
+  oidc_client_secret = keycloak_openid_client.harbor.client_secret
+  oidc_scope         = "openid,profile,email,offline_access"
+  oidc_groups_claim  = "groups"
+  oidc_admin_group   = "harbor-admins"
+  oidc_user_claim    = "preferred_username"
+  oidc_auto_onboard  = true
+  oidc_verify_cert   = true
 }
 
 # LAN route on the HTTPS wildcard listener. Backend is harbor's nginx Service

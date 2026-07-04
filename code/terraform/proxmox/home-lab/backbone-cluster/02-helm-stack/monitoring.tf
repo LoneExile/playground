@@ -11,8 +11,9 @@
 
 resource "helm_release" "kube_prometheus_stack" {
   depends_on = [
-    kubectl_manifest.apps,                # namespace comes from node-thermal.yaml doc 0
-    helm_release.nfs_subdir_provisioner,  # Prometheus/Grafana/Alertmanager PVCs
+    kubectl_manifest.apps,               # namespace comes from node-thermal.yaml doc 0
+    helm_release.nfs_subdir_provisioner, # Prometheus/Grafana/Alertmanager PVCs
+    kubernetes_secret_v1.grafana_oidc,   # OIDC client secret consumed via envValueFrom
   ]
 
   name             = "kube-prometheus-stack"
@@ -48,6 +49,29 @@ resource "helm_release" "kube_prometheus_stack" {
     name  = "grafana.adminPassword"
     value = var.grafana_admin_password
   }
+
+  # OIDC client secret is NOT set here: the grafana subchart's assertNoLeakedSecrets
+  # guard rejects a literal secret in grafana.ini (it would land in the ConfigMap
+  # in plaintext). Instead grafana.ini uses $__env{GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET}
+  # and the value is injected from the Secret below via grafana.envValueFrom (in
+  # values/kube-prometheus-stack.yaml).
+}
+
+# k8s Secret holding the Keycloak-generated `grafana` client secret, consumed by
+# Grafana as the GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET env var (envValueFrom in the
+# values file → $__env{} expansion in grafana.ini). Lives in the monitoring
+# namespace (owned by node-thermal.yaml, applied via kubectl_manifest.apps).
+resource "kubernetes_secret_v1" "grafana_oidc" {
+  depends_on = [kubectl_manifest.apps] # monitoring namespace
+
+  metadata {
+    name      = "grafana-oidc"
+    namespace = "monitoring"
+  }
+  data = {
+    client-secret = keycloak_openid_client.grafana.client_secret
+  }
+  type = "Opaque"
 }
 
 # Public hostname for Grafana on the shared gateway. Service name follows the

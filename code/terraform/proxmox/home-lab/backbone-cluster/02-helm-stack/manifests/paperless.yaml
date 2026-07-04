@@ -96,6 +96,10 @@ type: Opaque
 stringData:
   PAPERLESS_DBPASS: "${paperless_db_password}"
   PAPERLESS_SECRET_KEY: "${paperless_secret_key}"
+  # OIDC via django-allauth (homelab realm). Kept in the Secret because the JSON
+  # embeds the Keycloak-generated client secret. provider_id "keycloak" → callback
+  # /accounts/oidc/keycloak/login/callback/.
+  PAPERLESS_SOCIALACCOUNT_PROVIDERS: '{"openid_connect":{"OAUTH_PKCE_ENABLED":true,"APPS":[{"provider_id":"keycloak","name":"Keycloak","client_id":"paperless","secret":"${paperless_oidc_client_secret}","settings":{"server_url":"https://keycloak.0dl.me/realms/homelab/.well-known/openid-configuration","fetch_userinfo":true}}],"SCOPE":["openid","profile","email"]}}'
 ---
 # Postgres 16 — restored data dir from NFS. The original 'paperless' role's
 # password is unknown; the postStart hook re-asserts it via ALTER USER on
@@ -392,11 +396,22 @@ spec:
             # the app does `tuple(json.loads(...))` on this env var.
             - {name: PAPERLESS_PROXY_SSL_HEADER,     value: '["HTTP_X_FORWARDED_PROTO","https"]'}
 
+            # OIDC SSO via Keycloak (django-allauth). "Lock to me": signups OFF
+            # (both social + local) — a first-time SSO login links to an existing
+            # user by matching email, or connect it once under Settings. The
+            # "Sign in with Keycloak" button appears automatically. Keycloak must
+            # be reachable at boot (discovery URL) or the login page errors.
+            - {name: PAPERLESS_APPS, value: "allauth.socialaccount.providers.openid_connect"}
+            - {name: PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS, value: "false"}
+            - {name: PAPERLESS_ACCOUNT_ALLOW_SIGNUPS,       value: "false"}
+
             # Secrets pulled from the templated Secret.
             - name: PAPERLESS_DBPASS
               valueFrom: {secretKeyRef: {name: paperless-secrets, key: PAPERLESS_DBPASS}}
             - name: PAPERLESS_SECRET_KEY
               valueFrom: {secretKeyRef: {name: paperless-secrets, key: PAPERLESS_SECRET_KEY}}
+            - name: PAPERLESS_SOCIALACCOUNT_PROVIDERS
+              valueFrom: {secretKeyRef: {name: paperless-secrets, key: PAPERLESS_SOCIALACCOUNT_PROVIDERS}}
           volumeMounts:
             - {name: nas, mountPath: /usr/src/paperless/consume, subPath: config/paperless/consume}
             - {name: nas, mountPath: /usr/src/paperless/data,    subPath: config/paperless/data}

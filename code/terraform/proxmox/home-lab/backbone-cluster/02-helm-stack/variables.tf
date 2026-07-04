@@ -321,6 +321,35 @@ variable "sftpgo_s3_secret_key" {
   sensitive   = true
 }
 
+# --- OIDC client secrets (pinned) ---
+# GitLab, Paperless and Reactive Resume render their OIDC client secret INTO an
+# app manifest that lives in the shared kubectl_manifest.apps for_each — which
+# helm_release.keycloak depends on (its DB manifest is in the same set). Using
+# the Keycloak client's computed .client_secret there would create a dependency
+# cycle (apps → client → realm → keycloak → apps), so the secret is pinned from
+# a var and fed to BOTH the Keycloak client (keycloak-clients.tf) and the app
+# manifest — same pattern as sftpgo_oidc_client_secret. Generate each with
+# `openssl rand -base64 32`. (Grafana + Harbor take their secret from the
+# Keycloak-generated .client_secret directly — they're not in the apps for_each,
+# so no cycle.)
+variable "gitlab_oidc_client_secret" {
+  description = "Client secret shared by the Keycloak `gitlab` OIDC client and GitLab's omniauth config."
+  type        = string
+  sensitive   = true
+}
+
+variable "paperless_oidc_client_secret" {
+  description = "Client secret shared by the Keycloak `paperless` OIDC client and PAPERLESS_SOCIALACCOUNT_PROVIDERS."
+  type        = string
+  sensitive   = true
+}
+
+variable "reactive_resume_oidc_client_secret" {
+  description = "Client secret shared by the Keycloak `reactive-resume` OIDC client and Reactive Resume's OAUTH_CLIENT_SECRET."
+  type        = string
+  sensitive   = true
+}
+
 # --- OpenBao ---
 # Used by openbao.tf (official openbao Helm chart). No secrets var: OpenBao's
 # root token + unseal keys are produced at `bao operator init` time (manual,

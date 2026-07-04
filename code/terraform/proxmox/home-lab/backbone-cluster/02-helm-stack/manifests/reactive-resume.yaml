@@ -94,6 +94,8 @@ stringData:
   auth-secret: "${reactive_resume_auth_secret}"
   encryption-secret: "${reactive_resume_encryption_secret}"
   storage-secret-key: "${reactive_resume_storage_secret_key}"
+  # Keycloak-generated `reactive-resume` client secret (Better Auth genericOAuth).
+  oauth-client-secret: "${reactive_resume_oidc_client_secret}"
 ---
 # Postgres 16 (debian) — FRESH v5 PGDATA on NFS at config/reactive-resume/db-v5.
 # Uses uid 999 like the proven immich PG-on-this-NFS setup. initContainer chowns +
@@ -390,6 +392,19 @@ spec:
             # Signups locked — owner account (lex / me@apinant.dev) exists. Flip
             # back to "false" + re-apply only to register another account.
             - {name: FLAG_DISABLE_SIGNUPS, value: "true"}
+            # OIDC SSO via Keycloak (homelab realm) — Better Auth genericOAuth
+            # (providerId "custom", callback /api/auth/oauth2/callback/custom on
+            # APP_URL). With signups disabled, SSO links to the existing owner
+            # account by matching email — so Keycloak must assert me@apinant.dev.
+            # To onboard a NEW SSO identity, flip FLAG_DISABLE_SIGNUPS to "false"
+            # for one login, then re-lock. Only the public APP_URL host is trusted.
+            - {name: OAUTH_PROVIDER_NAME, value: "Keycloak"}
+            - {name: OAUTH_CLIENT_ID,     value: "reactive-resume"}
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: reactive-resume-secrets, key: oauth-client-secret}
+            - {name: OAUTH_DISCOVERY_URL, value: "https://keycloak.0dl.me/realms/homelab/.well-known/openid-configuration"}
+            - {name: OAUTH_SCOPES,        value: "openid profile email"}
           startupProbe:
             httpGet: {path: /api/health, port: http}
             initialDelaySeconds: 10

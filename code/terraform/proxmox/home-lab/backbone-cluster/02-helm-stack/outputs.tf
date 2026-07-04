@@ -30,6 +30,28 @@ output "openbao_oidc_client_secret" {
   sensitive   = true
 }
 
+# Client secrets for the three apps whose OIDC config lives outside Terraform
+# (open-webui on off-cluster LXC 102; immich + memos store it in their DB). Wire
+# them by hand — see the "Homelab — Keycloak OIDC rollout" ZenNote. Retrieve with
+# `terraform output -raw <name>`.
+output "immich_oidc_client_secret" {
+  description = "Keycloak `immich` client secret. Set in Immich admin OAuth settings (or its config file)."
+  value       = keycloak_openid_client.immich.client_secret
+  sensitive   = true
+}
+
+output "memos_oidc_client_secret" {
+  description = "Keycloak `memos` client secret. Set in Memos SSO identity provider (Settings → SSO / API)."
+  value       = keycloak_openid_client.memos.client_secret
+  sensitive   = true
+}
+
+output "open_webui_oidc_client_secret" {
+  description = "Keycloak `open-webui` client secret. Set OAUTH_CLIENT_SECRET on the Open WebUI container (LXC 102)."
+  value       = keycloak_openid_client.open_webui.client_secret
+  sensitive   = true
+}
+
 output "cloudflare_wildcard_record" {
   description = "Cloudflare A record managed by this stage"
   value = {

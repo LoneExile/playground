@@ -32,6 +32,9 @@ locals {
     paperless = templatefile("${path.module}/manifests/paperless.yaml", {
       paperless_db_password = var.paperless_db_password
       paperless_secret_key  = var.paperless_secret_key
+      # Pinned OIDC secret rendered into the PAPERLESS_SOCIALACCOUNT_PROVIDERS JSON
+      # (var, not the client attribute — cycle break, see variables.tf).
+      paperless_oidc_client_secret = var.paperless_oidc_client_secret
     })
     immich = templatefile("${path.module}/manifests/immich.yaml", {
       immich_db_password = var.immich_db_password
@@ -45,6 +48,9 @@ locals {
     gitlab = templatefile("${path.module}/manifests/gitlab.yaml", {
       gitlab_root_password_b64 = base64encode(var.gitlab_root_password)
       gitlab_ssh_ip            = var.gitlab_ssh_ip
+      # Pinned OIDC secret, base64'd into the gitlab-secrets Secret (var, not the
+      # client attribute, to avoid the apps↔keycloak cycle — see variables.tf).
+      gitlab_oidc_client_secret_b64 = base64encode(var.gitlab_oidc_client_secret)
     })
     ecoflow = templatefile("${path.module}/manifests/ecoflow-monitor.yaml", {
       ecoflow_image        = var.ecoflow_image
@@ -97,6 +103,9 @@ locals {
       reactive_resume_auth_secret        = var.reactive_resume_auth_secret
       reactive_resume_encryption_secret  = var.reactive_resume_encryption_secret
       reactive_resume_storage_secret_key = var.reactive_resume_storage_secret_key
+      # Pinned OIDC secret for the Better Auth genericOAuth provider (var, not the
+      # client attribute — cycle break, see variables.tf).
+      reactive_resume_oidc_client_secret = var.reactive_resume_oidc_client_secret
     })
   }
 }

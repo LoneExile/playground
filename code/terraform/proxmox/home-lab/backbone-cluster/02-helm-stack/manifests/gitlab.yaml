@@ -65,6 +65,9 @@ type: Opaque
 data:
   # base64encode()d in apps.tf — keeps any future password charset YAML-safe
   root-password: "${gitlab_root_password_b64}"
+  # Keycloak-generated `gitlab` client secret; consumed via ENV in the OmniAuth
+  # block (never inlined in GITLAB_OMNIBUS_CONFIG).
+  oidc-client-secret: "${gitlab_oidc_client_secret_b64}"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -97,6 +100,9 @@ spec:
             - name: GITLAB_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef: {name: gitlab-secrets, key: root-password}
+            - name: GITLAB_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: gitlab-secrets, key: oidc-client-secret}
             - name: GITLAB_OMNIBUS_CONFIG
               value: |
                 external_url 'https://gitlab.home.0dl.me'
@@ -134,6 +140,38 @@ spec:
                 # homelab-sized: omnibus defaults assume worker-per-core
                 puma['worker_processes'] = 2
                 sidekiq['concurrency'] = 10
+                # --- OIDC SSO via Keycloak (homelab realm) ---
+                # "Lock to me": omniauth_allow_single_sign_on=false blocks
+                # auto-creating new accounts; auto_link_user links an SSO login to
+                # an EXISTING GitLab user whose email matches the Keycloak-asserted
+                # email. So your GitLab account's email must equal your Keycloak
+                # (GitHub-brokered) email, or connect it once via Profile → Account.
+                # The client secret is read from ENV (gitlab-secrets Secret),
+                # evaluated at reconfigure time — never inlined here.
+                gitlab_rails['omniauth_enabled'] = true
+                gitlab_rails['omniauth_allow_single_sign_on'] = false
+                gitlab_rails['omniauth_block_auto_created_users'] = true
+                gitlab_rails['omniauth_auto_link_user'] = ['openid_connect']
+                gitlab_rails['omniauth_providers'] = [
+                  {
+                    name: "openid_connect",
+                    label: "Keycloak",
+                    args: {
+                      name: "openid_connect",
+                      scope: ["openid", "profile", "email"],
+                      response_type: "code",
+                      issuer: "https://keycloak.0dl.me/realms/homelab",
+                      client_auth_method: "query",
+                      discovery: true,
+                      uid_field: "preferred_username",
+                      pkce: true,
+                      client_options: {
+                        identifier: "gitlab",
+                        secret: ENV['GITLAB_OIDC_CLIENT_SECRET']
+                      }
+                    }
+                  }
+                ]
           securityContext:
             runAsUser: 0
             runAsGroup: 0
