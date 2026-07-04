@@ -60,5 +60,9 @@ terraform {
       source  = "grafana/grafana"
       version = "~> 3.0"
     }
+    keycloak = {
+      source  = "keycloak/keycloak"
+      version = "~> 5.0"
+    }
   }
 }

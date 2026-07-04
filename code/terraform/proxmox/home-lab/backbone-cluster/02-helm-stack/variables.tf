@@ -266,6 +266,30 @@ variable "keycloak_db_password" {
   sensitive   = true
 }
 
+# Password for the non-interactive `terraform` Keycloak admin user (created via
+# `kc.sh bootstrap-admin user`). The keycloak provider authenticates as this
+# user instead of the human `admin`, which has TOTP enabled (password grant
+# can't do OTP). Generate with: openssl rand -base64 24.
+variable "keycloak_terraform_password" {
+  description = "Password for the non-interactive 'terraform' Keycloak admin user used by the keycloak provider."
+  type        = string
+  sensitive   = true
+}
+
+# Used by keycloak-oidc.tf (homelab realm GitHub identity provider). Create a
+# GitHub OAuth App at https://github.com/settings/developers with callback URL
+# https://keycloak.0dl.me/realms/homelab/broker/github/endpoint, then set these.
+variable "keycloak_github_client_id" {
+  description = "GitHub OAuth App client ID for the Keycloak `homelab` realm GitHub identity provider."
+  type        = string
+}
+
+variable "keycloak_github_client_secret" {
+  description = "GitHub OAuth App client secret for the Keycloak GitHub identity provider."
+  type        = string
+  sensitive   = true
+}
+
 # --- OpenBao ---
 # Used by openbao.tf (official openbao Helm chart). No secrets var: OpenBao's
 # root token + unseal keys are produced at `bao operator init` time (manual,

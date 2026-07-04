@@ -24,6 +24,12 @@ output "grafana_mcp_urls" {
   }
 }
 
+output "openbao_oidc_client_secret" {
+  description = "Keycloak `openbao` client secret. Feed to OpenBao's oidc auth config (auth/oidc/config oidc_client_secret). Retrieve with `terraform output -raw openbao_oidc_client_secret`."
+  value       = keycloak_openid_client.openbao.client_secret
+  sensitive   = true
+}
+
 output "cloudflare_wildcard_record" {
   description = "Cloudflare A record managed by this stage"
   value = {

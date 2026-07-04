@@ -49,6 +49,22 @@ provider "gitlab" {
   token    = var.gitlab_api_token
 }
 
+# Keycloak provider manages the `homelab` realm SSO (GitHub IdP + service OIDC
+# clients). Talks to Keycloak over its LAN hostname (valid wildcard TLS).
+#
+# Auth: a dedicated non-interactive `terraform` admin user (created once via
+# `kc.sh bootstrap-admin user`), NOT the human `admin` — that account has TOTP
+# enabled, and Keycloak's password grant can't satisfy OTP, so it can't be used
+# for automation. Password lives in terraform.tfvars (gitignored) + state.
+# Keycloak must be up before these resources apply (earlier pass on a fresh
+# cluster).
+provider "keycloak" {
+  client_id = "admin-cli"
+  username  = "terraform"
+  password  = var.keycloak_terraform_password
+  url       = "https://keycloak.${local.fqdn_base}"
+}
+
 # =============================================================================
 # Locals
 # =============================================================================
