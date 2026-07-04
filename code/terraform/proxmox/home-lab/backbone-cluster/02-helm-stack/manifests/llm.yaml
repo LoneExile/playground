@@ -119,6 +119,10 @@ spec:
 ---
 # Tunnel route — bare chat.0dl.me via Cloudflare Tunnel. HTTP-only at the
 # gateway (CF terminates TLS at the edge), so bind to the :http listener.
+# CF forwards http to the gateway's :80 listener; force X-Forwarded-Proto: https
+# so Open WebUI (uvicorn runs --forwarded-allow-ips *) builds https OAuth
+# redirect URIs — otherwise it emits http://chat.0dl.me/oauth/oidc/callback and
+# Keycloak rejects it as an invalid redirect_uri (same fix as keycloak/sftpgo).
 # Manual Cloudflare-side follow-ups (can't be terraformed here):
 #   1. Cloudflare DNS: add CNAME `chat.0dl.me` → `<tunnel-id>.cfargotunnel.com`
 #      (look up the tunnel ID jellyfin/memos/trilium/siyuan already use).
@@ -140,6 +144,11 @@ spec:
   hostnames:
     - chat.0dl.me
   rules:
-    - backendRefs:
+    - filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - {name: X-Forwarded-Proto, value: https}
+      backendRefs:
         - name: llm-ui
           port: 8080
