@@ -72,6 +72,16 @@ resource "keycloak_oidc_github_identity_provider" "github" {
 # Config keys are exact (from Keycloak source ConditionalUserAttributeValueFactory):
 # attribute_name / attribute_expected_value / not. The match is case-sensitive.
 #
+# TERMINAL ALLOW (critical): a Keycloak flow MUST end with an execution that
+# SUCCEEDS, or the whole flow throws AuthenticationFlowException ("no successful
+# execution") and login dies with error=invalid_user_credentials — BEFORE any
+# redirect back to the app. For the owner the deny subflow is skipped, so without
+# a trailing success the flow is empty → every homelab app OIDC login breaks on a
+# fresh GitHub re-broker (cached SSO sessions mask it until logout). The
+# `allow-access-authenticator` below is that required terminal success: the owner
+# reaches it (subflow skipped) and passes; a non-owner is denied inside the
+# subflow and the flow fails before ever reaching it.
+#
 # LOCKOUT NOTE: the deny only fires for non-matching emails, so a correct
 # owner_email can't lock the owner out. If it's ever wrong (e.g. GitHub email
 # change / wrong case), OIDC breaks for every homelab app — recover via any app's
@@ -116,6 +126,21 @@ resource "keycloak_authentication_execution" "restrict_owner_deny" {
   requirement       = "REQUIRED"
 
   depends_on = [keycloak_authentication_execution.restrict_owner_condition]
+}
+
+# Terminal success at the TOP level of restrict-to-owner (NOT inside the subflow).
+# Sits AFTER the conditional-deny subflow (creation order → execution order, hence
+# the depends_on). The owner skips the subflow and lands here → SUCCESS → the flow
+# succeeds and login continues. A non-owner is denied inside the subflow, which
+# fails the flow before this ever runs. Without this the owner path is empty and
+# the flow throws AuthenticationFlowException (see header).
+resource "keycloak_authentication_execution" "restrict_owner_allow" {
+  realm_id          = keycloak_realm.homelab.id
+  parent_flow_alias = keycloak_authentication_flow.restrict_owner.alias
+  authenticator     = "allow-access-authenticator"
+  requirement       = "REQUIRED"
+
+  depends_on = [keycloak_authentication_execution.restrict_owner_deny]
 }
 
 # GitHub login for the Keycloak admin console itself (master realm), so the
