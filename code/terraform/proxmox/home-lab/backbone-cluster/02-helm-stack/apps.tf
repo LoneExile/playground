@@ -84,6 +84,8 @@ locals {
       sftpgo_bootstrap_password = var.sftpgo_bootstrap_password
       sftpgo_host               = local.hostnames.sftpgo
       sftpgo_tunnel_host        = "sftpgo.${var.primary_domain}"
+      sftpgo_s3_access_key      = var.sftpgo_s3_access_key
+      sftpgo_s3_secret_key      = var.sftpgo_s3_secret_key
     })
     reactive_resume = templatefile("${path.module}/manifests/reactive-resume.yaml", {
       reactive_resume_db_password        = var.reactive_resume_db_password

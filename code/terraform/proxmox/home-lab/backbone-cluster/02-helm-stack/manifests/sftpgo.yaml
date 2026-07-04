@@ -34,10 +34,12 @@ metadata:
 type: Opaque
 stringData:
   oidc-client-secret: "${sftpgo_oidc_client_secret}"
-  # Initial data loaded at startup (SFTPGO_LOADDATA_MODE=1 → add-only, never
-  # clobbers later UI edits). One admin + one user, both named to match the
-  # Keycloak preferred_username so OIDC resolves them. The user's home is the
-  # NAS root, so the web client browses the whole share like filebrowser did.
+  # Declarative bootstrap (SFTPGO_LOADDATA_MODE=0 → add+update, re-applied every
+  # start so this file is the source of truth; UI edits to these objects are
+  # reverted on restart). One admin + one user named to match the Keycloak
+  # preferred_username so OIDC resolves them. The user's home is the NAS root
+  # (browse the whole share like filebrowser), plus a RustFS S3 bucket mounted
+  # as a virtual folder at /s3-home.
   loaddata.json: |
     {
       "admins": [
@@ -49,6 +51,24 @@ stringData:
           "description": "Bootstrap admin; Keycloak OIDC is the primary login."
         }
       ],
+      "folders": [
+        {
+          "name": "s3-rustfs",
+          "mapped_path": "/var/lib/sftpgo/vfolders/s3-rustfs",
+          "description": "RustFS S3 bucket 'sftpgo' (10.0.10.199:9000)",
+          "filesystem": {
+            "provider": 1,
+            "s3config": {
+              "bucket": "sftpgo",
+              "region": "us-east-1",
+              "endpoint": "http://10.0.10.199:9000",
+              "force_path_style": true,
+              "access_key": "${sftpgo_s3_access_key}",
+              "access_secret": { "status": "Plain", "payload": "${sftpgo_s3_secret_key}" }
+            }
+          }
+        }
+      ],
       "users": [
         {
           "username": "loneexile",
@@ -56,7 +76,15 @@ stringData:
           "status": 1,
           "home_dir": "/srv",
           "permissions": { "/": ["*"] },
-          "description": "Bootstrap user, home=NAS root; Keycloak OIDC primary login."
+          "description": "Bootstrap user, home=NAS root; Keycloak OIDC primary login.",
+          "virtual_folders": [
+            {
+              "name": "s3-rustfs",
+              "virtual_path": "/s3-home",
+              "quota_size": -1,
+              "quota_files": -1
+            }
+          ]
         }
       ]
     }
@@ -126,7 +154,9 @@ spec:
             - {name: SFTPGO_DATA_PROVIDER__NAME, value: /var/lib/sftpgo/sftpgo.db}
             # Bootstrap admin/user from the mounted Secret (add-only).
             - {name: SFTPGO_LOADDATA_FROM, value: /etc/sftpgo-init/loaddata.json}
-            - {name: SFTPGO_LOADDATA_MODE, value: "1"}
+            # 0 = add+update: this file is the source of truth, re-applied each
+            # start (needed so the S3 virtual folder lands on the existing user).
+            - {name: SFTPGO_LOADDATA_MODE, value: "0"}
             # HTTP binding (web admin + web client) — fronted by the gateway.
             - {name: SFTPGO_HTTPD__BINDINGS__0__PORT, value: "8080"}
             - {name: SFTPGO_HTTPD__BINDINGS__0__ENABLE_WEB_ADMIN, value: "true"}

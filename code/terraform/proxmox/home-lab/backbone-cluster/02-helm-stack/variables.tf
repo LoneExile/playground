@@ -305,6 +305,22 @@ variable "sftpgo_bootstrap_password" {
   sensitive   = true
 }
 
+# RustFS S3 credentials for SFTPGo's `s3-rustfs` virtual folder (bucket `sftpgo`
+# at 10.0.10.199:9000, mounted at /s3-home). Prefer a key scoped to just that
+# bucket — see the SFTPGo ZenNote for the security note on not reusing the
+# Terraform-state credentials.
+variable "sftpgo_s3_access_key" {
+  description = "Access key for the RustFS `sftpgo` bucket (SFTPGo S3 virtual folder)."
+  type        = string
+  sensitive   = true
+}
+
+variable "sftpgo_s3_secret_key" {
+  description = "Secret key for the RustFS `sftpgo` bucket (SFTPGo S3 virtual folder)."
+  type        = string
+  sensitive   = true
+}
+
 # --- OpenBao ---
 # Used by openbao.tf (official openbao Helm chart). No secrets var: OpenBao's
 # root token + unseal keys are produced at `bao operator init` time (manual,
