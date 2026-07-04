@@ -1,0 +1,184 @@
+# Dashy dashboard for the Backbone Cluster — all services, grouped, with icons.
+# Inlined into the `dashy-conf` ConfigMap in manifests/dashy.yaml (templatefile +
+# indent in apps.tf) and mounted read-only over /app/user-data/conf.yml, so this
+# file is the source of truth (edit here + terraform apply, not in-app).
+#
+# Auth: Keycloak via generic OIDC (homelab realm, public client "dashy",
+# redirect auth-code + PKCE). enableSilentRenew:false keeps it iframe-free, so
+# no realm-wide X-Frame-Options / CSP changes are needed for the cross-origin
+# (dashy.0dl.me ↔ keycloak.0dl.me) setup. Client is created in dashy.tf.
+# Icons: `favicon` pulls each service's real logo (public hosts); LAN-only
+# services (no tunnel) use bundled mdi-* icons since the favicon service can't
+# reach *.home.0dl.me.
+
+pageInfo:
+  title: Homelab
+  description: 0dl.me self-hosted services
+  navLinks:
+    - title: Grafana
+      path: https://grafana.0dl.me
+    - title: GitLab
+      path: https://gitlab.0dl.me
+
+appConfig:
+  theme: nord-frost
+  layout: auto
+  iconSize: medium
+  statusCheck: true
+  statusCheckInterval: 300
+  faviconApi: allesedv
+  preventWriteToDisk: true          # conf.yml is a read-only ConfigMap
+  disableConfigurationForNonAdmin: true
+  # No enableGuestAccess key: with auth configured, guest/anonymous view is off by
+  # default, so a Keycloak login is required. (The key is rejected at appConfig
+  # level by the 4.3.14 schema — the upstream docs are ahead of the release.)
+  auth:
+    enableOidc: true
+    oidc:
+      clientId: dashy
+      endpoint: https://keycloak.0dl.me/realms/homelab   # issuer URL (homelab realm)
+      scope: openid profile email
+      enableSilentRenew: false      # redirect-only; avoids the cross-origin renew iframe
+
+sections:
+  - name: Identity & Secrets
+    icon: mdi-shield-key-outline
+    items:
+      - title: Keycloak
+        description: Identity provider / SSO
+        icon: favicon
+        url: https://keycloak.0dl.me
+        target: newtab
+      - title: OpenBao
+        description: Secrets manager (Vault fork)
+        icon: favicon
+        url: https://openbao.0dl.me
+        target: newtab
+
+  - name: DevOps & Registry
+    icon: mdi-source-branch
+    items:
+      - title: GitLab
+        description: Git hosting & CI/CD
+        icon: favicon
+        url: https://gitlab.0dl.me
+        target: newtab
+      - title: Harbor
+        description: Container registry
+        icon: favicon
+        url: https://harbor.0dl.me
+        target: newtab
+
+  - name: Monitoring
+    icon: mdi-chart-areaspline
+    items:
+      - title: Grafana
+        description: Dashboards & alerting
+        icon: favicon
+        url: https://grafana.0dl.me
+        target: newtab
+      - title: Pool Monitor
+        description: ZFS / SMART / node health
+        icon: mdi-harddisk
+        url: https://pool.home.0dl.me
+        target: newtab
+      - title: EcoFlow
+        description: Battery / power monitor
+        icon: mdi-battery-charging-high
+        url: https://ecoflow.home.0dl.me
+        target: newtab
+
+  - name: Files & Sync
+    icon: mdi-folder-network-outline
+    items:
+      - title: SFTPGo
+        description: File server (web + SFTP + S3)
+        icon: favicon
+        url: https://sftpgo.0dl.me
+        target: newtab
+      - title: Syncthing
+        description: Continuous file sync
+        icon: favicon
+        url: https://syncthing.0dl.me
+        target: newtab
+
+  - name: Documents & Notes
+    icon: mdi-note-multiple-outline
+    items:
+      - title: Paperless
+        description: Document management
+        icon: favicon
+        url: https://paperless.0dl.me
+        target: newtab
+      - title: Trilium
+        description: Hierarchical notes
+        icon: favicon
+        url: https://trilium.0dl.me
+        target: newtab
+      - title: SiYuan
+        description: Block-based notes
+        icon: favicon
+        url: https://siyuan.0dl.me
+        target: newtab
+      - title: Memos
+        description: Lightweight memo / micro-blog
+        icon: favicon
+        url: https://memos.0dl.me
+        target: newtab
+      - title: ZenNotes
+        description: Markdown vault
+        icon: favicon
+        url: https://zennotes.0dl.me
+        target: newtab
+      - title: Reactive Resume
+        description: Resume builder
+        icon: favicon
+        url: https://resume.0dl.me
+        target: newtab
+      - title: Blog
+        description: Personal blog
+        icon: favicon
+        url: https://blog.apinant.dev
+        target: newtab
+
+  - name: Photos & Media
+    icon: mdi-play-circle-outline
+    items:
+      - title: Immich
+        description: Photo & video backup
+        icon: favicon
+        url: https://immich.0dl.me
+        target: newtab
+      - title: Jellyfin
+        description: Media server
+        icon: favicon
+        url: https://jellyfin.0dl.me
+        target: newtab
+
+  - name: Downloads
+    icon: mdi-download-circle-outline
+    items:
+      - title: qBittorrent
+        description: Torrent client
+        icon: favicon
+        url: https://qbit.0dl.me
+        target: newtab
+      - title: qui
+        description: qBittorrent web UI
+        icon: mdi-download-box-outline
+        url: https://qui.0dl.me
+        target: newtab
+
+  - name: AI
+    icon: mdi-robot-outline
+    items:
+      - title: Chat
+        description: LLM chat (Open WebUI)
+        icon: favicon
+        url: https://chat.0dl.me
+        target: newtab
+      - title: Image Gen
+        description: Stable Diffusion UI
+        icon: mdi-palette-outline
+        url: https://img.home.0dl.me
+        target: newtab

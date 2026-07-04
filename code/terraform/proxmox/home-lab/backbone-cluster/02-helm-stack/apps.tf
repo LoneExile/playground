@@ -10,7 +10,6 @@ locals {
   # Static manifests — applied verbatim.
   app_files = {
     blog            = "${path.module}/manifests/blog.yaml"
-    dashy           = "${path.module}/manifests/dashy.yaml"
     image_gen       = "${path.module}/manifests/image-gen.yaml"
     jellyfin        = "${path.module}/manifests/jellyfin.yaml"
     llm             = "${path.module}/manifests/llm.yaml"
@@ -24,6 +23,12 @@ locals {
 
   # Templated manifests — secrets / values from sensitive vars rendered in.
   app_rendered = {
+    # dashy carries no secret; it's templated only to inline the standalone
+    # dashboard config (manifests/dashy/conf.yml) into its ConfigMap doc, so the
+    # ConfigMap and Deployment apply in the same kubectl batch (no mount race).
+    dashy = templatefile("${path.module}/manifests/dashy.yaml", {
+      dashy_conf = file("${path.module}/manifests/dashy/conf.yml")
+    })
     paperless = templatefile("${path.module}/manifests/paperless.yaml", {
       paperless_db_password = var.paperless_db_password
       paperless_secret_key  = var.paperless_secret_key
