@@ -29,9 +29,18 @@
 # the issuer follows the request host — pinning one host avoids issuer drift.)
 
 resource "keycloak_realm" "homelab" {
+  # login_theme references the "homelab" theme, which only exists on the server
+  # once the pod has rolled with the ConfigMap mounted — depend on the release so
+  # the provider's theme validation doesn't race the rollout.
+  depends_on = [helm_release.keycloak]
+
   realm        = "homelab"
   enabled      = true
   display_name = "Homelab"
+
+  # Custom login page — theme files in themes/homelab/, shipped to the pod by
+  # keycloak-theme.tf and mounted via values/keycloak.yaml.
+  login_theme = "homelab"
 }
 
 # GitHub social login, brokered into the homelab realm. trust_email verifies the

@@ -71,6 +71,21 @@ ingress:
 metrics:
   enabled: false
 
+# Mount the custom "homelab" login theme (ConfigMap keycloak-theme-homelab,
+# created in keycloak-theme.tf) into the themes dir. subPath per-file so we only
+# add these two files under themes/homelab/login without clobbering the dir.
+extraVolumes: |
+  - name: theme-homelab
+    configMap:
+      name: keycloak-theme-homelab
+extraVolumeMounts: |
+  - name: theme-homelab
+    mountPath: /opt/keycloak/themes/homelab/login/theme.properties
+    subPath: theme.properties
+  - name: theme-homelab
+    mountPath: /opt/keycloak/themes/homelab/login/login.ftl
+    subPath: login.ftl
+
 service:
   httpPort: 80
 

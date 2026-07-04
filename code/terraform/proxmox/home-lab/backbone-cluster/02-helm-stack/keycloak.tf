@@ -15,7 +15,8 @@
 resource "helm_release" "keycloak" {
   depends_on = [
     time_sleep.wait_for_gateway,
-    kubectl_manifest.apps, # keycloak-db.yaml: namespace + secret + postgres
+    kubectl_manifest.apps,                          # keycloak-db.yaml: namespace + secret + postgres
+    kubernetes_config_map_v1.keycloak_theme_homelab, # login theme mounted via extraVolumes
   ]
 
   name             = "keycloak"
