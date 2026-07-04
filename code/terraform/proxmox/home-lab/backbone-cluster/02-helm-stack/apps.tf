@@ -19,6 +19,11 @@ locals {
     qbittorrent_qui = "${path.module}/manifests/qbittorrent-qui.yaml"
     syncthing       = "${path.module}/manifests/syncthing.yaml"
     trilium         = "${path.module}/manifests/trilium.yaml"
+    # Envoy Gateway SecurityPolicies gating the SSO-less apps behind TinyAuth.
+    # Kept separate from each app's manifest so the gate is opt-in and auditable
+    # in one place; depends on the tinyauth Service + ReferenceGrant (both in
+    # manifests/tinyauth.yaml), which apply in the same kubectl_manifest batch.
+    tinyauth_securitypolicies = "${path.module}/manifests/tinyauth-securitypolicies.yaml"
   }
 
   # Templated manifests — secrets / values from sensitive vars rendered in.
@@ -106,6 +111,17 @@ locals {
       # Pinned OIDC secret for the Better Auth genericOAuth provider (var, not the
       # client attribute — cycle break, see variables.tf).
       reactive_resume_oidc_client_secret = var.reactive_resume_oidc_client_secret
+    })
+    tinyauth = templatefile("${path.module}/manifests/tinyauth.yaml", {
+      # Pinned OIDC secret, base64'd into the tinyauth-secrets Secret (var, not
+      # the client attribute — cycle break, see variables.tf / tinyauth.tf).
+      tinyauth_oidc_client_secret_b64 = base64encode(var.tinyauth_oidc_client_secret)
+      tinyauth_owner_email            = var.tinyauth_owner_email
+      tinyauth_host                   = "tinyauth.${var.primary_domain}"
+      keycloak_host                   = "keycloak.${var.primary_domain}"
+      # Envoy gateway pods (pod CIDR) are the only proxies allowed to set the
+      # X-Forwarded-* headers TinyAuth trusts for host/proto reconstruction.
+      trusted_proxies = "100.124.0.0/16"
     })
   }
 }

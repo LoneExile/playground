@@ -362,6 +362,25 @@ variable "reactive_resume_oidc_client_secret" {
   sensitive   = true
 }
 
+# --- TinyAuth (forward-auth SSO) ---
+# TinyAuth fronts the apps that have no native OIDC (pool/ecoflow/image-gen +
+# trilium/siyuan/zennotes) via Envoy Gateway SecurityPolicy ext_authz. Its OIDC
+# client secret feeds BOTH the Keycloak `tinyauth` client (tinyauth.tf) AND the
+# rendered manifests/tinyauth.yaml Secret (apps.tf for_each) — same apps↔keycloak
+# cycle as the pinned secrets above, so it is pinned from this var. Generate with
+# `openssl rand -base64 32`.
+variable "tinyauth_oidc_client_secret" {
+  description = "Client secret shared by the Keycloak `tinyauth` OIDC client and TinyAuth's generic OIDC provider config."
+  type        = string
+  sensitive   = true
+}
+
+variable "tinyauth_owner_email" {
+  description = "The only email allowed to complete a TinyAuth login (global OAUTH whitelist). Defense-in-depth over the already owner-restricted Keycloak realm."
+  type        = string
+  default     = "hello@apinant.dev"
+}
+
 # --- OpenBao ---
 # Used by openbao.tf (official openbao Helm chart). No secrets var: OpenBao's
 # root token + unseal keys are produced at `bao operator init` time (manual,
