@@ -246,6 +246,26 @@ variable "hermes_webhook_secret" {
   sensitive   = true
 }
 
+# --- Keycloak ---
+# Used by keycloak.tf (codecentric keycloakx Helm chart) + manifests/keycloak-db.yaml.
+variable "keycloakx_chart_version" {
+  description = "codecentric keycloakx Helm chart version (Keycloak 26.x). See https://github.com/codecentric/helm-charts/releases."
+  type        = string
+  default     = "7.2.0" # Keycloak 26.6.2 (latest published in the chart repo)
+}
+
+variable "keycloak_admin_password" {
+  description = "Bootstrap admin password for Keycloak (user 'admin'). Seeds KC_BOOTSTRAP_ADMIN_PASSWORD on first boot only — after that it lives in the Keycloak DB, so rotating this var does not change the account (change it in the Keycloak admin console). Generate with: openssl rand -base64 24."
+  type        = string
+  sensitive   = true
+}
+
+variable "keycloak_db_password" {
+  description = "Password for Keycloak's Postgres (role/db 'keycloak'). Set by initdb on first boot; consumed by the postgres container and the keycloakx chart (database.existingSecret). NOTE: the PGDATA on NFS (config/keycloak/db) survives destroy — on re-provision with a different value, initdb is skipped and auth fails; keep the old value or wipe the NFS subtree. Generate with: openssl rand -base64 24."
+  type        = string
+  sensitive   = true
+}
+
 # --- Harbor ---
 # Used by harbor.tf (harbor helm release).
 variable "harbor_admin_password" {

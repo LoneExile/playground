@@ -75,6 +75,10 @@ locals {
         }
       }))
     })
+    keycloak = templatefile("${path.module}/manifests/keycloak-db.yaml", {
+      keycloak_db_password    = var.keycloak_db_password
+      keycloak_admin_password = var.keycloak_admin_password
+    })
     reactive_resume = templatefile("${path.module}/manifests/reactive-resume.yaml", {
       reactive_resume_db_password        = var.reactive_resume_db_password
       reactive_resume_auth_secret        = var.reactive_resume_auth_secret

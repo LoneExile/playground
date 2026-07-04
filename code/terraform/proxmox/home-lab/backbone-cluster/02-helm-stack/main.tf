@@ -62,6 +62,7 @@ locals {
     gitlab      = "gitlab.${local.fqdn_base}"
     grafana     = "grafana.${local.fqdn_base}"
     harbor      = "harbor.${local.fqdn_base}"
+    keycloak    = "keycloak.${local.fqdn_base}"
     jellyfin    = "jellyfin.${local.fqdn_base}"
     qui         = "qui.${local.fqdn_base}"
     qbittorrent = "qbit.${local.fqdn_base}"
