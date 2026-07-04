@@ -53,6 +53,69 @@ resource "keycloak_oidc_github_identity_provider" "github" {
   client_secret = var.keycloak_github_client_secret
   trust_email   = true
   sync_mode     = "IMPORT"
+
+  # Realm access gate: only the owner's email may complete a GitHub login into
+  # this realm. Runs on EVERY broker login (post-broker), so it also blocks any
+  # account that already brokered in — not just first logins. Flow below.
+  post_broker_login_flow_alias = keycloak_authentication_flow.restrict_owner.alias
+}
+
+# =============================================================================
+# Realm access restriction — "only the owner may enter the homelab realm"
+# =============================================================================
+# Closes the hole that the GitHub IdP admits ANY GitHub account into the realm.
+# A CONDITIONAL subflow denies access unless the authenticated user's `email`
+# equals var.homelab_owner_email. For the owner the condition is FALSE (the email
+# matches), so the subflow is skipped and login proceeds; for everyone else the
+# condition is TRUE (email != owner, via `not = true`) → Deny Access.
+#
+# Config keys are exact (from Keycloak source ConditionalUserAttributeValueFactory):
+# attribute_name / attribute_expected_value / not. The match is case-sensitive.
+#
+# LOCKOUT NOTE: the deny only fires for non-matching emails, so a correct
+# owner_email can't lock the owner out. If it's ever wrong (e.g. GitHub email
+# change / wrong case), OIDC breaks for every homelab app — recover via any app's
+# local admin, or fix the flow in the master-realm Keycloak admin console.
+resource "keycloak_authentication_flow" "restrict_owner" {
+  realm_id = keycloak_realm.homelab.id
+  alias    = "restrict-to-owner"
+}
+
+resource "keycloak_authentication_subflow" "restrict_owner_check" {
+  realm_id          = keycloak_realm.homelab.id
+  alias             = "restrict-to-owner-check"
+  parent_flow_alias = keycloak_authentication_flow.restrict_owner.alias
+  requirement       = "CONDITIONAL"
+}
+
+resource "keycloak_authentication_execution" "restrict_owner_condition" {
+  realm_id          = keycloak_realm.homelab.id
+  parent_flow_alias = keycloak_authentication_subflow.restrict_owner_check.alias
+  authenticator     = "conditional-user-attribute"
+  requirement       = "REQUIRED"
+}
+
+resource "keycloak_authentication_execution_config" "restrict_owner_condition" {
+  realm_id     = keycloak_realm.homelab.id
+  execution_id = keycloak_authentication_execution.restrict_owner_condition.id
+  alias        = "restrict-to-owner-email"
+  config = {
+    attribute_name           = "email"
+    attribute_expected_value = var.homelab_owner_email
+    not                      = "true" # deny when email != owner
+  }
+}
+
+# depends_on forces this execution to be created AFTER the condition so it sits
+# below it in the subflow (executions run in creation order); the deny must run
+# only after the condition has been evaluated.
+resource "keycloak_authentication_execution" "restrict_owner_deny" {
+  realm_id          = keycloak_realm.homelab.id
+  parent_flow_alias = keycloak_authentication_subflow.restrict_owner_check.alias
+  authenticator     = "deny-access-authenticator"
+  requirement       = "REQUIRED"
+
+  depends_on = [keycloak_authentication_execution.restrict_owner_condition]
 }
 
 # GitHub login for the Keycloak admin console itself (master realm), so the

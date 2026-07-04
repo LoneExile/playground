@@ -284,6 +284,18 @@ variable "keycloak_github_client_id" {
   type        = string
 }
 
+# The ONLY GitHub-brokered email allowed into the homelab realm. A post-broker-
+# login flow (keycloak-oidc.tf) denies every other user, closing the "any GitHub
+# account can broker in" hole. Must EXACTLY (case-sensitive) match the email
+# Keycloak stores for your account (currently lowercase). If your GitHub primary
+# email changes, update this or you lock yourself out of every homelab OIDC app
+# (local admins stay as break-glass; the KC admin console is in the master realm).
+variable "homelab_owner_email" {
+  description = "Single email permitted into the homelab Keycloak realm via GitHub broker login."
+  type        = string
+  default     = "hello@apinant.dev"
+}
+
 variable "keycloak_github_client_secret" {
   description = "GitHub OAuth App client secret for the Keycloak GitHub identity provider."
   type        = string
