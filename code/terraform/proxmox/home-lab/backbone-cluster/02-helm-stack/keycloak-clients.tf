@@ -45,6 +45,26 @@ resource "keycloak_openid_client" "grafana" {
   ]
 }
 
+# Grafana evaluates role_attribute_path (values/kube-prometheus-stack.yaml:
+# contains(realm_access.roles[*], 'homelab-admin') ...) against the ID token +
+# userinfo. But the realm `roles` client scope's "realm roles" mapper writes
+# realm_access.roles to the ACCESS token only, so Grafana never sees it and every
+# user lands as Viewer. This client-scoped mapper re-emits realm roles into the
+# ID token + userinfo (same realm_access.roles claim) so the homelab-admin ->
+# GrafanaAdmin mapping actually fires. access_token stays off here to avoid
+# duplicating the scope mapper's claim.
+resource "keycloak_openid_user_realm_role_protocol_mapper" "grafana_realm_roles" {
+  realm_id    = keycloak_realm.homelab.id
+  client_id   = keycloak_openid_client.grafana.id
+  name        = "realm roles (id+userinfo)"
+  claim_name  = "realm_access.roles"
+  multivalued = true
+
+  add_to_id_token     = true
+  add_to_userinfo     = true
+  add_to_access_token = false
+}
+
 # --- GitLab ---------------------------------------------------------------
 resource "keycloak_openid_client" "gitlab" {
   realm_id  = keycloak_realm.homelab.id
