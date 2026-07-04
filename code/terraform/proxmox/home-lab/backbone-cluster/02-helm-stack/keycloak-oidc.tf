@@ -46,6 +46,27 @@ resource "keycloak_oidc_github_identity_provider" "github" {
   sync_mode     = "IMPORT"
 }
 
+# GitHub login for the Keycloak admin console itself (master realm), so the
+# cluster can be administered with a GitHub account instead of the temporary
+# bootstrap admin. Reuses the SAME GitHub OAuth App as the homelab IdP above:
+# GitHub allows a request redirect_uri that is a subdirectory of the App's
+# registered callback, so the App's Authorization callback URL is broadened to
+# the parent `https://keycloak.0dl.me/realms/`, which covers every realm's
+# `/realms/<realm>/broker/github/endpoint`. Hence the same client id/secret.
+#
+# NOTE: the `admin` role must be granted to your brokered master user BY HAND
+# (Users → your user → Role mapping → assign `admin`). Terraform can't do it —
+# the user only exists after the first GitHub login. Never auto-assign admin via
+# an IdP role-mapper: that would make every GitHub account a Keycloak admin.
+resource "keycloak_oidc_github_identity_provider" "github_master" {
+  realm         = "master"
+  alias         = "github"
+  client_id     = var.keycloak_github_client_id
+  client_secret = var.keycloak_github_client_secret
+  trust_email   = true
+  sync_mode     = "IMPORT"
+}
+
 # Confidential OIDC client OpenBao authenticates as. The redirect URIs are
 # OpenBao's OIDC callbacks — UI (both hostnames) + the CLI's localhost listener.
 # Path segment `oidc/oidc/callback` = <auth-method-mount=oidc>/oidc/callback.
