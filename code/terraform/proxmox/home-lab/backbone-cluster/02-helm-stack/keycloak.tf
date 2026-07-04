@@ -85,6 +85,17 @@ resource "kubectl_manifest" "keycloak_route_tunnel" {
       }]
       hostnames = ["keycloak.${var.primary_domain}"]
       rules = [{
+        # The tunnel terminates TLS at Cloudflare and forwards plain HTTP to the
+        # gateway's :80 listener, so Envoy stamps X-Forwarded-Proto: http.
+        # Keycloak (SSL-required=external) then rejects with "HTTPS required" and
+        # the admin console's session-check iframe hangs. This path is ALWAYS
+        # https at the edge, so force the header back to https for Keycloak.
+        filters = [{
+          type = "RequestHeaderModifier"
+          requestHeaderModifier = {
+            set = [{ name = "X-Forwarded-Proto", value = "https" }]
+          }
+        }]
         backendRefs = [{
           name = "keycloak-http"
           port = 80
