@@ -167,7 +167,18 @@ spec:
                       pkce: true,
                       client_options: {
                         identifier: "gitlab",
-                        secret: ENV['GITLAB_OIDC_CLIENT_SECRET']
+                        secret: ENV['GITLAB_OIDC_CLIENT_SECRET'],
+                        # MUST be explicit: GitLab's OmniAuth full_host is a fixed
+                        # proc (Settings.gitlab.base_url), so the openid_connect
+                        # gem omits redirect_uri from the authorize request. With
+                        # two redirect URIs registered on the Keycloak client,
+                        # Keycloak can't default and rejects with
+                        # "Invalid parameter: redirect_uri". Pin it to the
+                        # external_url host (where the OmniAuth state cookie is
+                        # set) so the code comes back to the same origin — OIDC
+                        # login therefore works on gitlab.home.0dl.me (LAN /
+                        # Tailscale), not the public tunnel host.
+                        redirect_uri: "https://gitlab.home.0dl.me/users/auth/openid_connect/callback"
                       }
                     }
                   }
