@@ -290,6 +290,21 @@ variable "keycloak_github_client_secret" {
   sensitive   = true
 }
 
+# --- SFTPGo ---
+# Used by manifests/sftpgo.yaml (rendered in apps.tf) + the sftpgo Keycloak
+# client (sftpgo.tf). Generate both with: openssl rand -base64 24.
+variable "sftpgo_oidc_client_secret" {
+  description = "Client secret shared by the Keycloak `sftpgo` OIDC client and SFTPGo's oidc config."
+  type        = string
+  sensitive   = true
+}
+
+variable "sftpgo_bootstrap_password" {
+  description = "Break-glass password for the bootstrapped SFTPGo admin+user 'loneexile' (OIDC is the primary login)."
+  type        = string
+  sensitive   = true
+}
+
 # --- OpenBao ---
 # Used by openbao.tf (official openbao Helm chart). No secrets var: OpenBao's
 # root token + unseal keys are produced at `bao operator init` time (manual,

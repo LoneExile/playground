@@ -80,6 +80,12 @@ locals {
       keycloak_db_password    = var.keycloak_db_password
       keycloak_admin_password = var.keycloak_admin_password
     })
+    sftpgo = templatefile("${path.module}/manifests/sftpgo.yaml", {
+      sftpgo_oidc_client_secret = var.sftpgo_oidc_client_secret
+      sftpgo_bootstrap_password = var.sftpgo_bootstrap_password
+      sftpgo_host               = local.hostnames.sftpgo
+      sftpgo_tunnel_host        = "sftpgo.${var.primary_domain}"
+    })
     reactive_resume = templatefile("${path.module}/manifests/reactive-resume.yaml", {
       reactive_resume_db_password        = var.reactive_resume_db_password
       reactive_resume_auth_secret        = var.reactive_resume_auth_secret
