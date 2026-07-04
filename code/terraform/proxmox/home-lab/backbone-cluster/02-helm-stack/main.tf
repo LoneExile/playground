@@ -74,7 +74,6 @@ locals {
 
   # Fully qualified hostnames per app.
   hostnames = {
-    filebrowser = "files.${local.fqdn_base}"
     gitlab      = "gitlab.${local.fqdn_base}"
     grafana     = "grafana.${local.fqdn_base}"
     harbor      = "harbor.${local.fqdn_base}"

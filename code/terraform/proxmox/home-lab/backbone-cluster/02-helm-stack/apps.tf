@@ -11,7 +11,6 @@ locals {
   app_files = {
     blog            = "${path.module}/manifests/blog.yaml"
     dashy           = "${path.module}/manifests/dashy.yaml"
-    filebrowser     = "${path.module}/manifests/filebrowser.yaml"
     image_gen       = "${path.module}/manifests/image-gen.yaml"
     jellyfin        = "${path.module}/manifests/jellyfin.yaml"
     llm             = "${path.module}/manifests/llm.yaml"
