@@ -114,3 +114,45 @@ spec:
     http:
       backendRefs:
         - {name: tinyauth, namespace: tinyauth, port: 3001}
+---
+# Syncthing GUI (LAN + tunnel). Only the web GUI/REST on :8384 is gated; the
+# device-sync protocol runs on the separate syncthing-peer Service (22000/21027,
+# not an HTTPRoute) so peer sync is unaffected by extAuth.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: tinyauth
+  namespace: syncthing
+spec:
+  targetRefs:
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: syncthing}
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: syncthing-tunnel}
+  extAuth:
+    failOpen: false
+    headersToExtAuth: [host, cookie, x-forwarded-proto, x-forwarded-host, x-forwarded-for, accept, user-agent]
+    http:
+      backendRefs:
+        - {name: tinyauth, namespace: tinyauth, port: 3001}
+---
+# Torrents stack (ns torrents): the qui manager UI and the qBittorrent WebUI,
+# each LAN + tunnel. NOTE the qBittorrent WebUI host is also its API — gating it
+# blocks any external API client on qbit.*, but qui itself is unaffected because
+# it talks to qBittorrent over the in-cluster Service
+# (qbittorrent.torrents.svc.cluster.local:8080), which never traverses this route.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: tinyauth
+  namespace: torrents
+spec:
+  targetRefs:
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: qui}
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: qui-tunnel}
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: qbittorrent}
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: qbittorrent-tunnel}
+  extAuth:
+    failOpen: false
+    headersToExtAuth: [host, cookie, x-forwarded-proto, x-forwarded-host, x-forwarded-for, accept, user-agent]
+    http:
+      backendRefs:
+        - {name: tinyauth, namespace: tinyauth, port: 3001}

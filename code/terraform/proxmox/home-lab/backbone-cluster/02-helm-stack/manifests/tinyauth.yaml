@@ -266,5 +266,11 @@ spec:
     - {group: gateway.envoyproxy.io, kind: SecurityPolicy, namespace: trilium}
     - {group: gateway.envoyproxy.io, kind: SecurityPolicy, namespace: siyuan}
     - {group: gateway.envoyproxy.io, kind: SecurityPolicy, namespace: zennotes}
+    # SSO-less apps that had their own local login, folded behind TinyAuth: the
+    # syncthing GUI (device-sync protocol on a separate Service is unaffected) and
+    # the torrents stack (qBittorrent WebUI + qui manager; qui reaches qBittorrent
+    # over the in-cluster Service, so gating the ingress doesn't touch it).
+    - {group: gateway.envoyproxy.io, kind: SecurityPolicy, namespace: syncthing}
+    - {group: gateway.envoyproxy.io, kind: SecurityPolicy, namespace: torrents}
   to:
     - {group: "", kind: Service, name: tinyauth}
