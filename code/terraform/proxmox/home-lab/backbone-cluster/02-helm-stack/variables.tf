@@ -54,6 +54,12 @@ variable "harbor_chart_version" {
   default     = "1.19.1"
 }
 
+variable "cnpg_version" {
+  description = "CloudNativePG operator helm chart version (chart 0.29.x = operator 1.30.x)"
+  type        = string
+  default     = "0.29.0"
+}
+
 # --- Network ---
 variable "metallb_ip_range" {
   description = "MetalLB L2 IP pool (must be in cluster subnet)"
