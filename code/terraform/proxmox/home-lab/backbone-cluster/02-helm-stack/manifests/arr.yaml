@@ -251,11 +251,14 @@ spec:
             - {name: nas, mountPath: /config, subPath: config/sonarr}
         # Jellyfin creates the media dirs as root; make the TV library root
         # writable by the *arr user (911) so Sonarr can create show folders +
-        # hardlink imports. Top-dir only — existing media keeps its owner and
-        # root-Jellyfin still reads. Idempotent, so a fresh cluster self-heals.
+        # hardlink imports. Also pre-create the qBittorrent category download
+        # dir (/data/download/tv-sonarr) — qBit only makes it on first grab, so
+        # without this Sonarr's health check flags a missing remote path.
+        # Top-dir only — existing media keeps its owner and root-Jellyfin still
+        # reads. Idempotent, so a fresh cluster self-heals.
         - name: prep-data
           image: busybox:1.36
-          command: ["sh", "-c", "mkdir -p /data/series && chown 911:911 /data/series && chmod 775 /data/series"]
+          command: ["sh", "-c", "mkdir -p /data/series /data/download/tv-sonarr && chown 911:911 /data/series /data/download/tv-sonarr && chmod 775 /data/series /data/download/tv-sonarr"]
           volumeMounts:
             - {name: nas, mountPath: /data, subPath: home}
       containers:
@@ -367,10 +370,12 @@ spec:
           volumeMounts:
             - {name: nas, mountPath: /config, subPath: config/radarr}
         # Make the movie library root writable by the *arr user (911) — see the
-        # Sonarr prep-data note above. Idempotent.
+        # Sonarr prep-data note above. Also pre-creates the qBittorrent radarr
+        # category download dir so Radarr's remote-path health check passes
+        # before the first grab. Idempotent.
         - name: prep-data
           image: busybox:1.36
-          command: ["sh", "-c", "mkdir -p /data/movie && chown 911:911 /data/movie && chmod 775 /data/movie"]
+          command: ["sh", "-c", "mkdir -p /data/movie /data/download/radarr && chown 911:911 /data/movie /data/download/radarr && chmod 775 /data/movie /data/download/radarr"]
           volumeMounts:
             - {name: nas, mountPath: /data, subPath: home}
       containers:
