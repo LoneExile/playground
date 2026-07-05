@@ -142,6 +142,26 @@ data:
     }
     ensure_flaresolverr
 
+    # --- Tag the Sonarr/Radarr Prowlarr Applications with "flaresolverr" ------
+    # A tagged indexer (e.g. 1337x behind Byparr) only syncs to Apps sharing a
+    # tag, so the apps need the tag too. Safe: per the Servarr sync rule an
+    # UNTAGGED indexer syncs to all apps regardless of app tags, so normal
+    # indexers keep flowing to Sonarr/Radarr — this only ADMITS the tagged ones.
+    tag_app() {
+      name=$1
+      tid=$(curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" "$PROWLARR/api/v1/tag" | jq -r '.[]|select(.label=="flaresolverr")|.id')
+      [ -n "$tid" ] || { echo "prowlarr: no flaresolverr tag, skip $name"; return 0; }
+      app=$(curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" "$PROWLARR/api/v1/applications" | jq --arg n "$name" '[.[]|select(.name==$n)][0] // empty')
+      [ -n "$app" ] || { echo "prowlarr: app $name not found, skip"; return 0; }
+      if echo "$app" | jq -e --argjson t "$tid" '.tags|index($t)' >/dev/null 2>&1; then
+        echo "prowlarr: $name already tagged flaresolverr"; return 0; fi
+      id=$(echo "$app" | jq -r '.id')
+      payload=$(echo "$app" | jq --argjson t "$tid" '.tags += [$t] | .tags |= unique')
+      curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" -H 'Content-Type: application/json' -X PUT "$PROWLARR/api/v1/applications/$id" -d "$payload" >/dev/null && echo "prowlarr: $name tagged flaresolverr"
+    }
+    tag_app "Sonarr"
+    tag_app "Radarr"
+
     echo "wiring complete"
 ---
 apiVersion: batch/v1
