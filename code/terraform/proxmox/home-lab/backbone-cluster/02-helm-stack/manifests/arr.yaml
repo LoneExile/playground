@@ -519,13 +519,20 @@ spec:
         - {name: seerr, port: 5055}
 ---
 # =============================================================================
-# FlareSolverr — headless-Chrome proxy that solves Cloudflare/DDoS-Guard JS
-# challenges for Prowlarr. CF-protected indexers (e.g. 1337x) are tagged
-# "flaresolverr" in Prowlarr and routed here (the indexer-proxy + tag are
-# seeded by the wiring Job). Internal only: no HTTPRoute, no TinyAuth gate —
-# nothing but Prowlarr on the in-cluster Service DNS ever reaches it. Stateless
-# (rebuilds its browser each start) so no PV. Runs Chrome with --no-sandbox, so
-# baseline PSA is enough; the headless browser is the memory hog here.
+# Byparr — Cloudflare/DDoS-Guard challenge solver for Prowlarr. Drop-in for the
+# now-defunct FlareSolverr: same /v1 API on :8191, so the k8s resources keep the
+# "flaresolverr" name and the seeded Prowlarr indexer-proxy (impl FlareSolverr,
+# host flaresolverr.arr.svc:8191) + "flaresolverr" tag are unchanged. Upstream
+# FlareSolverr can no longer clear modern managed-challenge/Turnstile sites
+# (1337x timed out); Byparr uses Camoufox (patched Firefox) and currently has
+# the best open-source Turnstile clearance rate.
+#
+# CF-protected indexers are tagged "flaresolverr" in Prowlarr and routed here.
+# Internal only: no HTTPRoute, no TinyAuth gate — nothing but Prowlarr on the
+# in-cluster Service DNS reaches it. Stateless (rebuilds its browser each start)
+# so no PV. Baseline PSA is enough; the headless browser is the memory hog.
+# Image is :latest — Byparr ships no clean semver container tag (matches their
+# own compose); it trails Cloudflare by ~weeks, which is fine for an *arr stack.
 # =============================================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -544,30 +551,28 @@ spec:
     spec:
       containers:
         - name: flaresolverr
-          image: ghcr.io/flaresolverr/flaresolverr:v3.3.21
+          image: ghcr.io/thephaseless/byparr:latest
           ports:
             - {name: http, containerPort: 8191}
           env:
             - {name: LOG_LEVEL, value: info}
             - {name: TZ, value: Asia/Bangkok}
-            - {name: CAPTCHA_SOLVER, value: none}
-            - {name: BROWSER_TIMEOUT, value: "40000"}
           resources:
             requests: {cpu: 100m, memory: 512Mi}
             limits:   {cpu: 1, memory: 2Gi}
           volumeMounts:
-            # Chromium crashes on launch ("Can not connect to the Service
-            # /app/chromedriver") when /dev/shm is the 64Mi container default —
-            # back it with node RAM so the headless browser has real shared mem.
+            # Camoufox (like Chromium) fails to launch when /dev/shm is the 64Mi
+            # container default — back it with node RAM for real shared memory.
             - {name: dshm, mountPath: /dev/shm}
           readinessProbe:
             httpGet: {path: /, port: 8191}
-            initialDelaySeconds: 10
+            initialDelaySeconds: 20
             periodSeconds: 10
           livenessProbe:
             httpGet: {path: /, port: 8191}
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 30
+            failureThreshold: 6
       volumes:
         - name: dshm
           emptyDir: {medium: Memory, sizeLimit: 1Gi}

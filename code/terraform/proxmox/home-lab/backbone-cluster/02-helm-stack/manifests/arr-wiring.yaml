@@ -110,6 +110,10 @@ data:
     # Prowlarr routes an indexer through FlareSolverr only when the indexer shares
     # this tag, so CF-protected indexers (e.g. 1337x) just need the tag added in
     # the UI — the proxy plumbing is already here.
+    # RT=120s: the backend is Byparr (Camoufox), which clears modern Turnstile
+    # but is slower than the old FlareSolverr (~40s cold observed) — give the
+    # solve real headroom so Prowlarr's proxy test doesn't time out first.
+    RT=120
     ensure_flaresolverr() {
       tagid=$(curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" "$PROWLARR/api/v1/tag" | jq -r '.[]|select(.label=="flaresolverr")|.id')
       if [ -z "$tagid" ]; then
@@ -118,17 +122,23 @@ data:
       else
         echo "prowlarr: tag flaresolverr exists ($tagid)"
       fi
-      if curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" "$PROWLARR/api/v1/indexerproxy" | jq -e '.[]|select(.implementation=="FlareSolverr")' >/dev/null 2>&1; then
-        echo "prowlarr: flaresolverr proxy exists"; return 0; fi
+      setfields='.tags=[$tid] | .fields=([.fields[] |
+          if .name=="host" then .value="http://flaresolverr.arr.svc.cluster.local:8191"
+          elif .name=="requestTimeout" then .value=$rt
+          else . end ])'
+      # Upsert: PUT the existing proxy (keeps id, refreshes host/timeout/tag) or
+      # POST a new one from the schema. Idempotent + survives value changes.
+      existing=$(curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" "$PROWLARR/api/v1/indexerproxy" | jq '[.[]|select(.implementation=="FlareSolverr")][0] // empty')
+      if [ -n "$existing" ]; then
+        id=$(echo "$existing" | jq -r '.id')
+        payload=$(echo "$existing" | jq --argjson tid "$tagid" --argjson rt "$RT" "$setfields")
+        curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" -H 'Content-Type: application/json' -X PUT "$PROWLARR/api/v1/indexerproxy/$id" -d "$payload" >/dev/null && echo "prowlarr: flaresolverr proxy updated (rt=$RT)"
+        return 0
+      fi
       tmpl=$(curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" "$PROWLARR/api/v1/indexerproxy/schema" | jq '[.[]|select(.implementation=="FlareSolverr")][0]')
       [ "$tmpl" != "null" ] && [ -n "$tmpl" ] || { echo "prowlarr: no flaresolverr schema"; return 1; }
-      payload=$(echo "$tmpl" | jq --argjson tid "$tagid" '
-        .name="FlareSolverr" | .tags=[$tid] |
-        .fields=([.fields[] |
-          if .name=="host" then .value="http://flaresolverr.arr.svc.cluster.local:8191"
-          elif .name=="requestTimeout" then .value=60
-          else . end ])')
-      curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" -H 'Content-Type: application/json' -X POST "$PROWLARR/api/v1/indexerproxy" -d "$payload" >/dev/null && echo "prowlarr: flaresolverr proxy added"
+      payload=$(echo "$tmpl" | jq --arg n "FlareSolverr" --argjson tid "$tagid" --argjson rt "$RT" ".name=\$n | $setfields")
+      curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" -H 'Content-Type: application/json' -X POST "$PROWLARR/api/v1/indexerproxy" -d "$payload" >/dev/null && echo "prowlarr: flaresolverr proxy added (rt=$RT)"
     }
     ensure_flaresolverr
 
