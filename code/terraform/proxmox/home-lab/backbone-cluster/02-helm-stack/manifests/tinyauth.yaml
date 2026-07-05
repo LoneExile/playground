@@ -272,5 +272,7 @@ spec:
     # over the in-cluster Service, so gating the ingress doesn't touch it).
     - {group: gateway.envoyproxy.io, kind: SecurityPolicy, namespace: syncthing}
     - {group: gateway.envoyproxy.io, kind: SecurityPolicy, namespace: torrents}
+    # Off-cluster hermes app fronted by the gateway (manifests/hermes.yaml).
+    - {group: gateway.envoyproxy.io, kind: SecurityPolicy, namespace: hermes}
   to:
     - {group: "", kind: Service, name: tinyauth}

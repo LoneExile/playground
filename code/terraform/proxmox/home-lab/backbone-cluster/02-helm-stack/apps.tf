@@ -10,6 +10,10 @@ locals {
   # Static manifests — applied verbatim.
   app_files = {
     blog            = "${path.module}/manifests/blog.yaml"
+    # Off-cluster app (uvicorn on 10.0.10.29) fronted by the gateway purely to be
+    # gated by TinyAuth: selector-less Service + external EndpointSlice + routes +
+    # SecurityPolicy. See the MANUAL Cloudflare cutover note in the manifest.
+    hermes          = "${path.module}/manifests/hermes.yaml"
     image_gen       = "${path.module}/manifests/image-gen.yaml"
     jellyfin        = "${path.module}/manifests/jellyfin.yaml"
     llm             = "${path.module}/manifests/llm.yaml"
