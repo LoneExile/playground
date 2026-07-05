@@ -29,11 +29,13 @@ data:
     RADARR=http://radarr.arr.svc.cluster.local:7878
     PROWLARR=http://prowlarr.arr.svc.cluster.local:9696
     QBIT=http://qbittorrent.torrents.svc.cluster.local:8080
+    FLARE=http://flaresolverr.arr.svc.cluster.local:8191
 
-    # Wait for every backend — including qBittorrent — before touching them, so
-    # the download-client connection test (which dials qbit) isn't run too early.
+    # Wait for every backend — including qBittorrent and FlareSolverr — before
+    # touching them, so the download-client test (dials qbit) and the FlareSolverr
+    # proxy test (dials FlareSolverr) aren't run before those backends are up.
     echo "waiting for backends..."
-    for u in "$SONARR/ping" "$RADARR/ping" "$PROWLARR/ping" "$QBIT/api/v2/app/version"; do
+    for u in "$SONARR/ping" "$RADARR/ping" "$PROWLARR/ping" "$QBIT/api/v2/app/version" "$FLARE/"; do
       i=0; until curl -sf "$u" >/dev/null 2>&1; do i=$((i+1)); [ $i -gt 120 ] && { echo "timeout $u"; exit 1; }; sleep 5; done
       echo "ok $u"
     done
@@ -102,6 +104,33 @@ data:
     }
     add_app "Sonarr" "Sonarr" "http://sonarr.arr.svc.cluster.local:8989" "$SONARR_API_KEY"
     add_app "Radarr" "Radarr" "http://radarr.arr.svc.cluster.local:7878" "$RADARR_API_KEY"
+
+    # --- Prowlarr FlareSolverr proxy + tag (for Cloudflare-protected indexers) ---
+    # Creates the "flaresolverr" tag and a FlareSolverr indexer-proxy carrying it.
+    # Prowlarr routes an indexer through FlareSolverr only when the indexer shares
+    # this tag, so CF-protected indexers (e.g. 1337x) just need the tag added in
+    # the UI — the proxy plumbing is already here.
+    ensure_flaresolverr() {
+      tagid=$(curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" "$PROWLARR/api/v1/tag" | jq -r '.[]|select(.label=="flaresolverr")|.id')
+      if [ -z "$tagid" ]; then
+        tagid=$(curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" -H 'Content-Type: application/json' -X POST "$PROWLARR/api/v1/tag" -d '{"label":"flaresolverr"}' | jq -r '.id')
+        echo "prowlarr: tag flaresolverr created ($tagid)"
+      else
+        echo "prowlarr: tag flaresolverr exists ($tagid)"
+      fi
+      if curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" "$PROWLARR/api/v1/indexerproxy" | jq -e '.[]|select(.implementation=="FlareSolverr")' >/dev/null 2>&1; then
+        echo "prowlarr: flaresolverr proxy exists"; return 0; fi
+      tmpl=$(curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" "$PROWLARR/api/v1/indexerproxy/schema" | jq '[.[]|select(.implementation=="FlareSolverr")][0]')
+      [ "$tmpl" != "null" ] && [ -n "$tmpl" ] || { echo "prowlarr: no flaresolverr schema"; return 1; }
+      payload=$(echo "$tmpl" | jq --argjson tid "$tagid" '
+        .name="FlareSolverr" | .tags=[$tid] |
+        .fields=([.fields[] |
+          if .name=="host" then .value="http://flaresolverr.arr.svc.cluster.local:8191"
+          elif .name=="requestTimeout" then .value=60
+          else . end ])')
+      curl -sf -H "X-Api-Key: $PROWLARR_API_KEY" -H 'Content-Type: application/json' -X POST "$PROWLARR/api/v1/indexerproxy" -d "$payload" >/dev/null && echo "prowlarr: flaresolverr proxy added"
+    }
+    ensure_flaresolverr
 
     echo "wiring complete"
 ---

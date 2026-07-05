@@ -157,14 +157,23 @@ spec:
             limits:   {cpu: 1, memory: 768Mi}
           volumeMounts:
             - {name: nas, mountPath: /config, subPath: config/prowlarr}
+          # Import-tolerant probes: a large library scan blocks /ping for
+          # seconds, so a tight liveness kill mid-write corrupts the SQLite-on-
+          # NFS config (losing download clients/root folders). Liveness needs
+          # ~5 min of sustained failure (30s x 10) before restarting; readiness
+          # tolerates ~90s so the UI isn't dropped from the Service during a scan.
           readinessProbe:
             httpGet: {path: /ping, port: 9696}
             initialDelaySeconds: 15
-            periodSeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 6
           livenessProbe:
             httpGet: {path: /ping, port: 9696}
-            initialDelaySeconds: 60
+            initialDelaySeconds: 120
             periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 10
       volumes:
         - name: nas
           persistentVolumeClaim: {claimName: arr-nas}
@@ -269,14 +278,19 @@ spec:
           volumeMounts:
             - {name: nas, mountPath: /config, subPath: config/sonarr}
             - {name: nas, mountPath: /data,   subPath: home}
+          # Import-tolerant probes — see prowlarr above for rationale.
           readinessProbe:
             httpGet: {path: /ping, port: 8989}
             initialDelaySeconds: 15
-            periodSeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 6
           livenessProbe:
             httpGet: {path: /ping, port: 8989}
-            initialDelaySeconds: 60
+            initialDelaySeconds: 120
             periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 10
       volumes:
         - name: nas
           persistentVolumeClaim: {claimName: arr-nas}
@@ -379,14 +393,19 @@ spec:
           volumeMounts:
             - {name: nas, mountPath: /config, subPath: config/radarr}
             - {name: nas, mountPath: /data,   subPath: home}
+          # Import-tolerant probes — see prowlarr above for rationale.
           readinessProbe:
             httpGet: {path: /ping, port: 7878}
             initialDelaySeconds: 15
-            periodSeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 6
           livenessProbe:
             httpGet: {path: /ping, port: 7878}
-            initialDelaySeconds: 60
+            initialDelaySeconds: 120
             periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 10
       volumes:
         - name: nas
           persistentVolumeClaim: {claimName: arr-nas}
@@ -461,11 +480,15 @@ spec:
           readinessProbe:
             httpGet: {path: /api/v1/settings/public, port: 5055}
             initialDelaySeconds: 20
-            periodSeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 6
           livenessProbe:
             httpGet: {path: /api/v1/settings/public, port: 5055}
-            initialDelaySeconds: 60
+            initialDelaySeconds: 120
             periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 10
       volumes:
         - name: nas
           persistentVolumeClaim: {claimName: arr-nas}
@@ -494,3 +517,61 @@ spec:
   rules:
     - backendRefs:
         - {name: seerr, port: 5055}
+---
+# =============================================================================
+# FlareSolverr — headless-Chrome proxy that solves Cloudflare/DDoS-Guard JS
+# challenges for Prowlarr. CF-protected indexers (e.g. 1337x) are tagged
+# "flaresolverr" in Prowlarr and routed here (the indexer-proxy + tag are
+# seeded by the wiring Job). Internal only: no HTTPRoute, no TinyAuth gate —
+# nothing but Prowlarr on the in-cluster Service DNS ever reaches it. Stateless
+# (rebuilds its browser each start) so no PV. Runs Chrome with --no-sandbox, so
+# baseline PSA is enough; the headless browser is the memory hog here.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flaresolverr
+  namespace: arr
+  labels: {app: flaresolverr}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: flaresolverr}
+  template:
+    metadata:
+      labels: {app: flaresolverr}
+    spec:
+      containers:
+        - name: flaresolverr
+          image: ghcr.io/flaresolverr/flaresolverr:v3.3.21
+          ports:
+            - {name: http, containerPort: 8191}
+          env:
+            - {name: LOG_LEVEL, value: info}
+            - {name: TZ, value: Asia/Bangkok}
+            - {name: CAPTCHA_SOLVER, value: none}
+            - {name: BROWSER_TIMEOUT, value: "40000"}
+          resources:
+            requests: {cpu: 100m, memory: 384Mi}
+            limits:   {cpu: 1, memory: 1Gi}
+          readinessProbe:
+            httpGet: {path: /, port: 8191}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /, port: 8191}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flaresolverr
+  namespace: arr
+  labels: {app: flaresolverr}
+spec:
+  type: ClusterIP
+  selector: {app: flaresolverr}
+  ports:
+    - {name: http, port: 8191, targetPort: http}
