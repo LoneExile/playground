@@ -152,6 +152,14 @@ spec:
             - {name: PROWLARR__AUTH__REQUIRED, value: DisabledForLocalAddresses}
             - name: PROWLARR__AUTH__APIKEY
               valueFrom: {secretKeyRef: {name: arr-secrets, key: prowlarr-api-key}}
+            # Postgres backend (CloudNativePG arr-pg) instead of SQLite-on-NFS.
+            - {name: PROWLARR__POSTGRES__HOST, value: arr-pg-rw.arr.svc.cluster.local}
+            - {name: PROWLARR__POSTGRES__PORT, value: "5432"}
+            - {name: PROWLARR__POSTGRES__USER, value: arr}
+            - name: PROWLARR__POSTGRES__PASSWORD
+              valueFrom: {secretKeyRef: {name: arr-pg-app, key: password}}
+            - {name: PROWLARR__POSTGRES__MAINDB, value: prowlarr-main}
+            - {name: PROWLARR__POSTGRES__LOGDB, value: prowlarr-log}
           resources:
             requests: {cpu: 50m, memory: 192Mi}
             limits:   {cpu: 1, memory: 768Mi}
@@ -275,6 +283,16 @@ spec:
             - {name: SONARR__AUTH__REQUIRED, value: DisabledForLocalAddresses}
             - name: SONARR__AUTH__APIKEY
               valueFrom: {secretKeyRef: {name: arr-secrets, key: sonarr-api-key}}
+            # Postgres backend (CloudNativePG arr-pg) instead of SQLite-on-NFS,
+            # which locks up under load. config.xml still holds the API key/auth;
+            # PG holds the application data. Password from the CNPG-managed secret.
+            - {name: SONARR__POSTGRES__HOST, value: arr-pg-rw.arr.svc.cluster.local}
+            - {name: SONARR__POSTGRES__PORT, value: "5432"}
+            - {name: SONARR__POSTGRES__USER, value: arr}
+            - name: SONARR__POSTGRES__PASSWORD
+              valueFrom: {secretKeyRef: {name: arr-pg-app, key: password}}
+            - {name: SONARR__POSTGRES__MAINDB, value: sonarr-main}
+            - {name: SONARR__POSTGRES__LOGDB, value: sonarr-log}
           resources:
             requests: {cpu: 100m, memory: 256Mi}
             limits:   {cpu: 2, memory: 1Gi}
@@ -392,6 +410,14 @@ spec:
             - {name: RADARR__AUTH__REQUIRED, value: DisabledForLocalAddresses}
             - name: RADARR__AUTH__APIKEY
               valueFrom: {secretKeyRef: {name: arr-secrets, key: radarr-api-key}}
+            # Postgres backend (CloudNativePG arr-pg) instead of SQLite-on-NFS.
+            - {name: RADARR__POSTGRES__HOST, value: arr-pg-rw.arr.svc.cluster.local}
+            - {name: RADARR__POSTGRES__PORT, value: "5432"}
+            - {name: RADARR__POSTGRES__USER, value: arr}
+            - name: RADARR__POSTGRES__PASSWORD
+              valueFrom: {secretKeyRef: {name: arr-pg-app, key: password}}
+            - {name: RADARR__POSTGRES__MAINDB, value: radarr-main}
+            - {name: RADARR__POSTGRES__LOGDB, value: radarr-log}
           resources:
             requests: {cpu: 100m, memory: 256Mi}
             limits:   {cpu: 2, memory: 1Gi}
