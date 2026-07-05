@@ -7,9 +7,14 @@
 # redirect auth-code + PKCE). enableSilentRenew:false keeps it iframe-free, so
 # no realm-wide X-Frame-Options / CSP changes are needed for the cross-origin
 # (dashy.0dl.me ↔ keycloak.0dl.me) setup. Client is created in dashy.tf.
-# Icons: `favicon` pulls each service's real logo (public hosts); LAN-only
-# services (no tunnel) use bundled mdi-* icons since the favicon service can't
-# reach *.home.0dl.me.
+# Icons: brand logos come from CDN icon packs resolved in the browser, so they
+# don't depend on each service's own host being reachable/unauthenticated (the
+# old `favicon` approach broke once services moved behind the Keycloak/TinyAuth
+# SSO gate — the favicon endpoint returns the login page, not the logo). Prefixes:
+#   hl-<name>  dashboard-icons (homarr-labs), coloured SVG logos
+#   sh-<name>  selfh.st icons, used where dashboard-icons has no slug
+#   mdi-<name> Material Design glyphs for the custom apps that have no brand logo
+# `favicon` is kept only for the personal blog (public, no auth).
 
 pageInfo:
   title: Homelab
@@ -46,12 +51,12 @@ sections:
     items:
       - title: Keycloak
         description: Identity provider / SSO
-        icon: favicon
+        icon: hl-keycloak
         url: https://keycloak.0dl.me
         target: newtab
       - title: OpenBao
         description: Secrets manager (Vault fork)
-        icon: favicon
+        icon: hl-openbao
         url: https://openbao.0dl.me
         target: newtab
 
@@ -60,12 +65,12 @@ sections:
     items:
       - title: GitLab
         description: Git hosting & CI/CD
-        icon: favicon
+        icon: hl-gitlab
         url: https://gitlab.0dl.me
         target: newtab
       - title: Harbor
         description: Container registry
-        icon: favicon
+        icon: hl-harbor
         url: https://harbor.0dl.me
         target: newtab
 
@@ -74,7 +79,7 @@ sections:
     items:
       - title: Grafana
         description: Dashboards & alerting
-        icon: favicon
+        icon: hl-grafana
         url: https://grafana.0dl.me
         target: newtab
       - title: Pool Monitor
@@ -93,12 +98,12 @@ sections:
     items:
       - title: SFTPGo
         description: File server (web + SFTP + S3)
-        icon: favicon
+        icon: sh-sftpgo
         url: https://sftpgo.0dl.me
         target: newtab
       - title: Syncthing
         description: Continuous file sync
-        icon: favicon
+        icon: hl-syncthing
         url: https://syncthing.0dl.me
         target: newtab
 
@@ -107,32 +112,32 @@ sections:
     items:
       - title: Paperless
         description: Document management
-        icon: favicon
+        icon: hl-paperless-ngx
         url: https://paperless.0dl.me
         target: newtab
       - title: Trilium
         description: Hierarchical notes
-        icon: favicon
+        icon: hl-trilium
         url: https://trilium.0dl.me
         target: newtab
       - title: SiYuan
         description: Block-based notes
-        icon: favicon
+        icon: hl-siyuan
         url: https://siyuan.0dl.me
         target: newtab
       - title: Memos
         description: Lightweight memo / micro-blog
-        icon: favicon
+        icon: hl-memos
         url: https://memos.0dl.me
         target: newtab
       - title: ZenNotes
         description: Markdown vault
-        icon: favicon
+        icon: mdi-notebook-outline
         url: https://zennotes.0dl.me
         target: newtab
       - title: Reactive Resume
         description: Resume builder
-        icon: favicon
+        icon: hl-reactive-resume
         url: https://resume.0dl.me
         target: newtab
       - title: Blog
@@ -146,12 +151,12 @@ sections:
     items:
       - title: Immich
         description: Photo & video backup
-        icon: favicon
+        icon: hl-immich
         url: https://immich.0dl.me
         target: newtab
       - title: Jellyfin
         description: Media server
-        icon: favicon
+        icon: hl-jellyfin
         url: https://jellyfin.0dl.me
         target: newtab
 
@@ -160,12 +165,12 @@ sections:
     items:
       - title: qBittorrent
         description: Torrent client
-        icon: favicon
+        icon: hl-qbittorrent
         url: https://qbit.0dl.me
         target: newtab
       - title: qui
         description: qBittorrent web UI
-        icon: mdi-download-box-outline
+        icon: hl-qui
         url: https://qui.0dl.me
         target: newtab
 
@@ -174,11 +179,11 @@ sections:
     items:
       - title: Chat
         description: LLM chat (Open WebUI)
-        icon: favicon
+        icon: hl-open-webui
         url: https://chat.0dl.me
         target: newtab
       - title: Image Gen
         description: Stable Diffusion UI
-        icon: mdi-palette-outline
+        icon: sh-automatic1111
         url: https://img.home.0dl.me
         target: newtab
