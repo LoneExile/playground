@@ -524,6 +524,33 @@ variable "pool_pve_token_id" {
   default     = "root@pam!terraform"
 }
 
+# --- *arr stack API keys ------------------------------------------------------
+# Pre-generated 32-hex keys, base64'd into the arr-secrets Secret (apps.tf) so
+# Prowlarr/Sonarr/Radarr seed their own API key at boot and the arr-wiring Job
+# can connect them declaratively. Generate with: openssl rand -hex 16. Rotate by
+# editing terraform.tfvars + re-applying (the seed-config init only writes when
+# config.xml is absent, so also update the running app's key or delete config.xml).
+variable "sonarr_api_key" {
+  description = "Sonarr API key (X-Api-Key). openssl rand -hex 16."
+  type        = string
+  sensitive   = true
+}
+variable "radarr_api_key" {
+  description = "Radarr API key (X-Api-Key). openssl rand -hex 16."
+  type        = string
+  sensitive   = true
+}
+variable "prowlarr_api_key" {
+  description = "Prowlarr API key (X-Api-Key). openssl rand -hex 16."
+  type        = string
+  sensitive   = true
+}
+variable "seerr_api_key" {
+  description = "Seerr API key (reserved for future headless wiring). openssl rand -hex 16."
+  type        = string
+  sensitive   = true
+}
+
 # --- Inherit harmless 01-stage vars so shared terraform.tfvars doesn't error ---
 # Not used in this stage; declared only so Terraform doesn't complain about
 # "undeclared variable" when loading ../terraform.tfvars.

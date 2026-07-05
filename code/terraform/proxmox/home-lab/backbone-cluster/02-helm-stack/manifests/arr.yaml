@@ -1,0 +1,496 @@
+# *arr media-automation stack — Prowlarr (indexers) → Sonarr (TV) / Radarr
+# (movies) → qBittorrent (download client, in the torrents namespace) →
+# Jellyfin (library). All four live in ONE namespace `arr` so inter-app calls
+# use short in-cluster Service DNS.
+#
+# STORAGE (static PV at the NFS share root + subPath, same pattern as jellyfin/
+# qbittorrent so the media library is shared and hardlinks work):
+#   - config → subPath config/<app>  (per-app settings + SQLite, matches the
+#     config/ layout of dashy/jelly/immich on the share)
+#   - Sonarr/Radarr also mount ONE data tree: subPath home → /data, giving
+#     /data/download (qbit), /data/series (Sonarr root + jellyfin /media/series),
+#     /data/movie (Radarr root + jellyfin /media/movies). Single mount = same
+#     filesystem = instant hardlink/atomic-move on import (TRaSH layout). qbit
+#     reports files under /downloads, bridged by a remote-path mapping to
+#     /data/download (added by the wiring Job).
+#
+# AUTH: the *arr have no OIDC, so Prowlarr/Sonarr/Radarr are gated by TinyAuth
+# forward-auth on their HTTPRoutes (see tinyauth-securitypolicies.yaml) and set
+# AuthenticationMethod=External + DisabledForLocalAddresses (env overrides +
+# seeded config.xml) so there is no double login and the X-Api-Key API stays
+# reachable for the internal callers. Seerr is the end-user request portal and
+# authenticates users via their Jellyfin accounts, so it is NOT TinyAuth-gated.
+#
+# API keys are pre-seeded (arr-secrets, rendered from sensitive vars in apps.tf)
+# so the post-apply wiring Job (manifests/arr-wiring.yaml) can connect everything
+# without any UI clicking.
+#
+# EXPOSURE: LAN-ONLY (<app>.home.0dl.me, resolved by the *.home.0dl.me wildcard
+# straight to the gateway — no Cloudflare step needed). We deliberately do NOT
+# publish the public *.0dl.me tunnel routes here:
+#   - Prowlarr/Sonarr/Radarr use AuthenticationMethod=External, so the TinyAuth
+#     SecurityPolicy is the ONLY auth gate. A public route would become an OPEN
+#     admin panel the moment that policy ever detached — admin tools stay LAN-only.
+#   - Seerr self-configures on first run; exposing it publicly before setup lets a
+#     stranger walk the wizard and hijack it. Keep it LAN-only until the Jellyfin
+#     login + admin user are configured, THEN add a seerr-tunnel HTTPRoute (+ the
+#     usual Cloudflare CNAME/Tunnel public-hostname) if remote requests are wanted.
+# Reach these on the LAN or over Tailscale.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: arr
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+---
+# Pre-seeded API keys (rendered from sensitive vars via templatefile in apps.tf).
+# Consumed as env (SONARR__AUTH__APIKEY etc.) by the apps and by the wiring Job.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: arr-secrets
+  namespace: arr
+type: Opaque
+data:
+  sonarr-api-key: "${sonarr_api_key_b64}"
+  radarr-api-key: "${radarr_api_key_b64}"
+  prowlarr-api-key: "${prowlarr_api_key_b64}"
+  seerr-api-key: "${seerr_api_key_b64}"
+---
+# Static PV at the shared NFS export root — identical server/path/options to
+# jellyfin-nas and qbittorrent-nas so config/ and home/ are the same dirs those
+# apps already use (required for a shared library + hardlinks).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: arr-nas
+spec:
+  capacity: {storage: 15Ti}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions: [nfsvers=4.1, nolock, noatime]
+  nfs:
+    server: 192.168.1.179
+    path: /zpool1/nfs_share
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: arr-nas
+  namespace: arr
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: arr-nas
+  resources:
+    requests: {storage: 15Ti}
+---
+# =============================================================================
+# Prowlarr — indexer manager (config only, no media/data mount)
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prowlarr
+  namespace: arr
+  labels: {app: prowlarr}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: prowlarr}
+  template:
+    metadata:
+      labels: {app: prowlarr}
+    spec:
+      initContainers:
+        # Seed config.xml once (create-if-missing) with a known ApiKey + External
+        # auth, so auth is correct on first boot even if the env overrides are
+        # ignored. linuxserver chowns /config to PUID on start, so root-written
+        # here is fine. Never overwrites an existing file (runtime edits survive).
+        - name: seed-config
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              CONF=/config/config.xml
+              if [ ! -f "$CONF" ]; then
+                cat > "$CONF" <<EOF
+              <Config>
+                <BindAddress>*</BindAddress>
+                <Port>9696</Port>
+                <UrlBase></UrlBase>
+                <ApiKey>$${PROWLARR_API_KEY}</ApiKey>
+                <AuthenticationMethod>External</AuthenticationMethod>
+                <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
+                <LogLevel>info</LogLevel>
+                <AnalyticsEnabled>False</AnalyticsEnabled>
+              </Config>
+              EOF
+                echo "seeded $CONF"
+              fi
+          env:
+            - name: PROWLARR_API_KEY
+              valueFrom: {secretKeyRef: {name: arr-secrets, key: prowlarr-api-key}}
+          volumeMounts:
+            - {name: nas, mountPath: /config, subPath: config/prowlarr}
+      containers:
+        - name: prowlarr
+          image: lscr.io/linuxserver/prowlarr:2.4.0
+          ports:
+            - {name: http, containerPort: 9696}
+          env:
+            - {name: PUID, value: "911"}
+            - {name: PGID, value: "911"}
+            - {name: UMASK, value: "002"}
+            - {name: TZ, value: Asia/Bangkok}
+            - {name: PROWLARR__AUTH__METHOD, value: External}
+            - {name: PROWLARR__AUTH__REQUIRED, value: DisabledForLocalAddresses}
+            - name: PROWLARR__AUTH__APIKEY
+              valueFrom: {secretKeyRef: {name: arr-secrets, key: prowlarr-api-key}}
+          resources:
+            requests: {cpu: 50m, memory: 192Mi}
+            limits:   {cpu: 1, memory: 768Mi}
+          volumeMounts:
+            - {name: nas, mountPath: /config, subPath: config/prowlarr}
+          readinessProbe:
+            httpGet: {path: /ping, port: 9696}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /ping, port: 9696}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: nas
+          persistentVolumeClaim: {claimName: arr-nas}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prowlarr
+  namespace: arr
+  labels: {app: prowlarr}
+spec:
+  type: ClusterIP
+  selector: {app: prowlarr}
+  ports:
+    - {name: http, port: 9696, targetPort: http}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: prowlarr
+  namespace: arr
+spec:
+  parentRefs:
+    - {name: backbone-gateway, namespace: gateway-system}
+  hostnames: [prowlarr.home.0dl.me]
+  rules:
+    - backendRefs:
+        - {name: prowlarr, port: 9696}
+---
+# =============================================================================
+# Sonarr — TV (config + shared /data for hardlinks)
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sonarr
+  namespace: arr
+  labels: {app: sonarr}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: sonarr}
+  template:
+    metadata:
+      labels: {app: sonarr}
+    spec:
+      initContainers:
+        - name: seed-config
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              CONF=/config/config.xml
+              if [ ! -f "$CONF" ]; then
+                cat > "$CONF" <<EOF
+              <Config>
+                <BindAddress>*</BindAddress>
+                <Port>8989</Port>
+                <UrlBase></UrlBase>
+                <ApiKey>$${SONARR_API_KEY}</ApiKey>
+                <AuthenticationMethod>External</AuthenticationMethod>
+                <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
+                <LogLevel>info</LogLevel>
+                <AnalyticsEnabled>False</AnalyticsEnabled>
+              </Config>
+              EOF
+                echo "seeded $CONF"
+              fi
+          env:
+            - name: SONARR_API_KEY
+              valueFrom: {secretKeyRef: {name: arr-secrets, key: sonarr-api-key}}
+          volumeMounts:
+            - {name: nas, mountPath: /config, subPath: config/sonarr}
+        # Jellyfin creates the media dirs as root; make the TV library root
+        # writable by the *arr user (911) so Sonarr can create show folders +
+        # hardlink imports. Top-dir only — existing media keeps its owner and
+        # root-Jellyfin still reads. Idempotent, so a fresh cluster self-heals.
+        - name: prep-data
+          image: busybox:1.36
+          command: ["sh", "-c", "mkdir -p /data/series && chown 911:911 /data/series && chmod 775 /data/series"]
+          volumeMounts:
+            - {name: nas, mountPath: /data, subPath: home}
+      containers:
+        - name: sonarr
+          image: lscr.io/linuxserver/sonarr:4.0.19
+          ports:
+            - {name: http, containerPort: 8989}
+          env:
+            - {name: PUID, value: "911"}
+            - {name: PGID, value: "911"}
+            - {name: UMASK, value: "002"}
+            - {name: TZ, value: Asia/Bangkok}
+            - {name: SONARR__AUTH__METHOD, value: External}
+            - {name: SONARR__AUTH__REQUIRED, value: DisabledForLocalAddresses}
+            - name: SONARR__AUTH__APIKEY
+              valueFrom: {secretKeyRef: {name: arr-secrets, key: sonarr-api-key}}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits:   {cpu: 2, memory: 1Gi}
+          volumeMounts:
+            - {name: nas, mountPath: /config, subPath: config/sonarr}
+            - {name: nas, mountPath: /data,   subPath: home}
+          readinessProbe:
+            httpGet: {path: /ping, port: 8989}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /ping, port: 8989}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: nas
+          persistentVolumeClaim: {claimName: arr-nas}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonarr
+  namespace: arr
+  labels: {app: sonarr}
+spec:
+  type: ClusterIP
+  selector: {app: sonarr}
+  ports:
+    - {name: http, port: 8989, targetPort: http}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sonarr
+  namespace: arr
+spec:
+  parentRefs:
+    - {name: backbone-gateway, namespace: gateway-system}
+  hostnames: [sonarr.home.0dl.me]
+  rules:
+    - backendRefs:
+        - {name: sonarr, port: 8989}
+---
+# =============================================================================
+# Radarr — movies (config + shared /data for hardlinks)
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: radarr
+  namespace: arr
+  labels: {app: radarr}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: radarr}
+  template:
+    metadata:
+      labels: {app: radarr}
+    spec:
+      initContainers:
+        - name: seed-config
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              CONF=/config/config.xml
+              if [ ! -f "$CONF" ]; then
+                cat > "$CONF" <<EOF
+              <Config>
+                <BindAddress>*</BindAddress>
+                <Port>7878</Port>
+                <UrlBase></UrlBase>
+                <ApiKey>$${RADARR_API_KEY}</ApiKey>
+                <AuthenticationMethod>External</AuthenticationMethod>
+                <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
+                <LogLevel>info</LogLevel>
+                <AnalyticsEnabled>False</AnalyticsEnabled>
+              </Config>
+              EOF
+                echo "seeded $CONF"
+              fi
+          env:
+            - name: RADARR_API_KEY
+              valueFrom: {secretKeyRef: {name: arr-secrets, key: radarr-api-key}}
+          volumeMounts:
+            - {name: nas, mountPath: /config, subPath: config/radarr}
+        # Make the movie library root writable by the *arr user (911) — see the
+        # Sonarr prep-data note above. Idempotent.
+        - name: prep-data
+          image: busybox:1.36
+          command: ["sh", "-c", "mkdir -p /data/movie && chown 911:911 /data/movie && chmod 775 /data/movie"]
+          volumeMounts:
+            - {name: nas, mountPath: /data, subPath: home}
+      containers:
+        - name: radarr
+          image: lscr.io/linuxserver/radarr:6.2.1
+          ports:
+            - {name: http, containerPort: 7878}
+          env:
+            - {name: PUID, value: "911"}
+            - {name: PGID, value: "911"}
+            - {name: UMASK, value: "002"}
+            - {name: TZ, value: Asia/Bangkok}
+            - {name: RADARR__AUTH__METHOD, value: External}
+            - {name: RADARR__AUTH__REQUIRED, value: DisabledForLocalAddresses}
+            - name: RADARR__AUTH__APIKEY
+              valueFrom: {secretKeyRef: {name: arr-secrets, key: radarr-api-key}}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits:   {cpu: 2, memory: 1Gi}
+          volumeMounts:
+            - {name: nas, mountPath: /config, subPath: config/radarr}
+            - {name: nas, mountPath: /data,   subPath: home}
+          readinessProbe:
+            httpGet: {path: /ping, port: 7878}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /ping, port: 7878}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: nas
+          persistentVolumeClaim: {claimName: arr-nas}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: radarr
+  namespace: arr
+  labels: {app: radarr}
+spec:
+  type: ClusterIP
+  selector: {app: radarr}
+  ports:
+    - {name: http, port: 7878, targetPort: http}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: radarr
+  namespace: arr
+spec:
+  parentRefs:
+    - {name: backbone-gateway, namespace: gateway-system}
+  hostnames: [radarr.home.0dl.me]
+  rules:
+    - backendRefs:
+        - {name: radarr, port: 7878}
+---
+# =============================================================================
+# Seerr — end-user request portal (Jellyfin auth; NOT TinyAuth-gated)
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seerr
+  namespace: arr
+  labels: {app: seerr}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: seerr}
+  template:
+    metadata:
+      labels: {app: seerr}
+    spec:
+      initContainers:
+        # Seerr runs as node UID 1000 and cannot chown; make the fresh config
+        # subdir writable by it. (No settings.json seed — Seerr self-configures
+        # on first run; Jellyfin + Sonarr/Radarr are linked once via the UI.)
+        - name: chown-config
+          image: busybox:1.36
+          command: ["sh", "-c", "chown -R 1000:1000 /app/config || true"]
+          securityContext: {runAsUser: 0}
+          volumeMounts:
+            - {name: nas, mountPath: /app/config, subPath: config/seerr}
+      containers:
+        - name: seerr
+          image: ghcr.io/seerr-team/seerr:v3.3.0
+          ports:
+            - {name: http, containerPort: 5055}
+          env:
+            - {name: TZ, value: Asia/Bangkok}
+            - {name: LOG_LEVEL, value: info}
+            - {name: PORT, value: "5055"}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits:   {cpu: 2, memory: 1Gi}
+          volumeMounts:
+            - {name: nas, mountPath: /app/config, subPath: config/seerr}
+          readinessProbe:
+            httpGet: {path: /api/v1/settings/public, port: 5055}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /api/v1/settings/public, port: 5055}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: nas
+          persistentVolumeClaim: {claimName: arr-nas}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seerr
+  namespace: arr
+  labels: {app: seerr}
+spec:
+  type: ClusterIP
+  selector: {app: seerr}
+  ports:
+    - {name: http, port: 5055, targetPort: http}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: seerr
+  namespace: arr
+spec:
+  parentRefs:
+    - {name: backbone-gateway, namespace: gateway-system}
+  hostnames: [seerr.home.0dl.me]
+  rules:
+    - backendRefs:
+        - {name: seerr, port: 5055}

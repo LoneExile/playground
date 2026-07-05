@@ -187,3 +187,27 @@ sections:
         icon: sh-automatic1111
         url: https://img.home.0dl.me
         target: newtab
+
+  - name: Media Automation
+    icon: mdi-television-play
+    items:
+      - title: Seerr
+        description: Media requests (Jellyfin login)
+        icon: hl-jellyseerr
+        url: https://seerr.home.0dl.me
+        target: newtab
+      - title: Sonarr
+        description: TV series management
+        icon: hl-sonarr
+        url: https://sonarr.home.0dl.me
+        target: newtab
+      - title: Radarr
+        description: Movie management
+        icon: hl-radarr
+        url: https://radarr.home.0dl.me
+        target: newtab
+      - title: Prowlarr
+        description: Indexer manager
+        icon: hl-prowlarr
+        url: https://prowlarr.home.0dl.me
+        target: newtab

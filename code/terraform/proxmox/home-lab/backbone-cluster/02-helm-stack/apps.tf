@@ -9,7 +9,11 @@
 locals {
   # Static manifests — applied verbatim.
   app_files = {
-    blog            = "${path.module}/manifests/blog.yaml"
+    # Post-apply Job that wires the *arr stack together (download clients, root
+    # folders, remote-path mapping, Prowlarr apps) via the seeded API keys. The
+    # apps themselves (arr) are templated below. Idempotent + safe to re-run.
+    arr_wiring = "${path.module}/manifests/arr-wiring.yaml"
+    blog       = "${path.module}/manifests/blog.yaml"
     # Off-cluster app (uvicorn on 10.0.10.29) fronted by the gateway purely to be
     # gated by TinyAuth: selector-less Service + external EndpointSlice + routes +
     # SecurityPolicy. See the MANUAL Cloudflare cutover note in the manifest.
@@ -32,6 +36,14 @@ locals {
 
   # Templated manifests — secrets / values from sensitive vars rendered in.
   app_rendered = {
+    # *arr stack — the pre-generated API keys are base64'd into the arr-secrets
+    # Secret so the apps seed their auth and the arr-wiring Job can connect them.
+    arr = templatefile("${path.module}/manifests/arr.yaml", {
+      sonarr_api_key_b64   = base64encode(var.sonarr_api_key)
+      radarr_api_key_b64   = base64encode(var.radarr_api_key)
+      prowlarr_api_key_b64 = base64encode(var.prowlarr_api_key)
+      seerr_api_key_b64    = base64encode(var.seerr_api_key)
+    })
     # dashy carries no secret; it's templated only to inline the standalone
     # dashboard config (manifests/dashy/conf.yml) into its ConfigMap doc, so the
     # ConfigMap and Deployment apply in the same kubectl batch (no mount race).
@@ -168,7 +180,9 @@ resource "kubectl_manifest" "apps" {
 
   # Don't block apply on the ecoflow/pool Deployments rolling out: their images
   # are built by GitLab CI *after* this apply creates the project + registry
-  # robots, so the pod is ImagePullBackOff until the first pipeline runs. Other
-  # apps keep the default rollout wait.
-  wait_for_rollout = !startswith(each.key, "ecoflow-") && !startswith(each.key, "pool-")
+  # robots, so the pod is ImagePullBackOff until the first pipeline runs. The
+  # arr-wiring Job is likewise excluded: it polls the *arr apps for readiness and
+  # would otherwise block the apply that is bringing those apps up. Other apps
+  # keep the default rollout wait.
+  wait_for_rollout = !startswith(each.key, "ecoflow-") && !startswith(each.key, "pool-") && !startswith(each.key, "arr_wiring-")
 }

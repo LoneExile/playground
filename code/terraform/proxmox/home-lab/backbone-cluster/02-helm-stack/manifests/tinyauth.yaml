@@ -274,5 +274,7 @@ spec:
     - {group: gateway.envoyproxy.io, kind: SecurityPolicy, namespace: torrents}
     # Off-cluster hermes app fronted by the gateway (manifests/hermes.yaml).
     - {group: gateway.envoyproxy.io, kind: SecurityPolicy, namespace: hermes}
+    # *arr admin tools (Prowlarr/Sonarr/Radarr); seerr is intentionally ungated.
+    - {group: gateway.envoyproxy.io, kind: SecurityPolicy, namespace: arr}
   to:
     - {group: "", kind: Service, name: tinyauth}

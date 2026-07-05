@@ -97,6 +97,21 @@ spec:
               set -eu
               rm -f /config/qBittorrent/qBittorrent-data.conf.lock /config/qBittorrent/lockfile /config/qBittorrent/BT_backup/lock 2>/dev/null || true
               echo "qbittorrent locks cleaned"
+              # Whitelist the cluster pod subnet on the WebUI so Sonarr/Radarr and
+              # the arr-wiring Job reach qBittorrent's API without credentials
+              # (inter-app, in-cluster only; the WebUI is still TinyAuth-gated at
+              # the gateway for humans). Also relax host-header validation so API
+              # callers addressing the Service DNS name aren't rejected. Re-asserted
+              # every start; qBittorrent preserves the keys across its own rewrites.
+              CONF=/config/qBittorrent/qBittorrent.conf
+              mkdir -p /config/qBittorrent
+              [ -f "$CONF" ] || printf '[Preferences]\n' > "$CONF"
+              grep -q '^\[Preferences\]' "$CONF" || printf '[Preferences]\n' >> "$CONF"
+              sed -i '/^WebUI\\AuthSubnetWhitelist/d;/^WebUI\\HostHeaderValidation/d' "$CONF"
+              sed -i '/^\[Preferences\]/a WebUI\\AuthSubnetWhitelist=100.124.0.0/16, 10.0.10.0/24' "$CONF"
+              sed -i '/^\[Preferences\]/a WebUI\\AuthSubnetWhitelistEnabled=true' "$CONF"
+              sed -i '/^\[Preferences\]/a WebUI\\HostHeaderValidation=false' "$CONF"
+              echo "qbittorrent webui subnet whitelist ensured"
           volumeMounts:
             - {name: nas, mountPath: /config, subPath: config/qbittorrent}
       containers:
@@ -109,6 +124,9 @@ spec:
           env:
             - {name: PUID, value: "911"}
             - {name: PGID, value: "911"}
+            # 002 → downloads land 664/775 so Sonarr/Radarr-hardlinked library
+            # files stay group-writable + world-readable (matches the arr stack).
+            - {name: UMASK, value: "002"}
             - {name: TZ,   value: "Asia/Bangkok"}
             - {name: WEBUI_PORT, value: "8080"}
             - {name: TORRENTING_PORT, value: "6881"}

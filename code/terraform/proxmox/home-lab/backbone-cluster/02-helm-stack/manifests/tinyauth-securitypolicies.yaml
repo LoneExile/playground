@@ -156,3 +156,26 @@ spec:
     http:
       backendRefs:
         - {name: tinyauth, namespace: tinyauth, port: 3001}
+---
+# *arr admin tools (ns arr): Prowlarr + Sonarr + Radarr, LAN routes only (they
+# have no public tunnel — they use AuthenticationMethod=External so this gate is
+# their ONLY auth, and an internet-facing route would be an open admin panel if
+# the policy ever detached). NOT seerr — the end-user request portal authenticates
+# via Jellyfin. Inter-app API (Prowlarr↔Sonarr/Radarr, Seerr→arr, arr→qBittorrent)
+# rides internal Service DNS and never traverses these routes, so it is unaffected.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: tinyauth
+  namespace: arr
+spec:
+  targetRefs:
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: prowlarr}
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: sonarr}
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: radarr}
+  extAuth:
+    failOpen: false
+    headersToExtAuth: [host, cookie, x-forwarded-proto, x-forwarded-host, x-forwarded-for, accept, user-agent]
+    http:
+      backendRefs:
+        - {name: tinyauth, namespace: tinyauth, port: 3001}
