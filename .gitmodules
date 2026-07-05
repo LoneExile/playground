@@ -1,0 +1,3 @@
+[submodule "code/terraform/proxmox/home-lab"]
+	path = code/terraform/proxmox/home-lab
+	url = git@github.com:LoneExile/homelab.git
