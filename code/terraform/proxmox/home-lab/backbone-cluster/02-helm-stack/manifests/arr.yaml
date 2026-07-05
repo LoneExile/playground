@@ -553,8 +553,13 @@ spec:
             - {name: CAPTCHA_SOLVER, value: none}
             - {name: BROWSER_TIMEOUT, value: "40000"}
           resources:
-            requests: {cpu: 100m, memory: 384Mi}
-            limits:   {cpu: 1, memory: 1Gi}
+            requests: {cpu: 100m, memory: 512Mi}
+            limits:   {cpu: 1, memory: 2Gi}
+          volumeMounts:
+            # Chromium crashes on launch ("Can not connect to the Service
+            # /app/chromedriver") when /dev/shm is the 64Mi container default —
+            # back it with node RAM so the headless browser has real shared mem.
+            - {name: dshm, mountPath: /dev/shm}
           readinessProbe:
             httpGet: {path: /, port: 8191}
             initialDelaySeconds: 10
@@ -563,6 +568,9 @@ spec:
             httpGet: {path: /, port: 8191}
             initialDelaySeconds: 30
             periodSeconds: 30
+      volumes:
+        - name: dshm
+          emptyDir: {medium: Memory, sizeLimit: 1Gi}
 ---
 apiVersion: v1
 kind: Service
