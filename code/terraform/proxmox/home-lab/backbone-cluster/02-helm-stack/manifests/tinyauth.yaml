@@ -153,11 +153,27 @@ spec:
             # debug for the initial ext_authz roll-out (empirical header/host
             # verification on pool-monitor); drop to info once proven.
             - {name: TINYAUTH_LOG_LEVEL, value: "debug"}
+            # --- UI branding: match the custom Keycloak login theme ---------------
+            # TinyAuth's only native theming knobs are the login-screen title and the
+            # background image (no custom-CSS/colour/logo support). Both SSO screens
+            # share the SAME forest wallpaper as the Keycloak homelab login theme
+            # (themes/homelab/login/login.ftl). Here the image is SELF-HOSTED: a webp
+            # of that Unsplash photo ships in the tinyauth-bg ConfigMap (assets/
+            # homelab-bg.webp, see tinyauth-bg.tf), mounted at RESOURCES_PATH and
+            # served by TinyAuth's file server under the /resources/ URL prefix (the
+            # default /background.jpg is instead a frontend-bundled asset) — so the
+            # background is /resources/homelab-bg.webp. No CDN hotlink, smaller
+            # payload, no egress. The card itself stays TinyAuth's stock dark card.
+            - {name: TINYAUTH_UI_TITLE, value: "Homelab"}
+            - {name: TINYAUTH_RESOURCES_PATH, value: "/resources"}
+            - {name: TINYAUTH_UI_BACKGROUNDIMAGE, value: "/resources/homelab-bg.webp"}
           resources:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 128Mi}
           volumeMounts:
             - {name: data, mountPath: /data}
+            # Self-hosted login wallpaper (webp) served from the resources dir.
+            - {name: bg, mountPath: /resources, readOnly: true}
           readinessProbe:
             tcpSocket: {port: 3000}
             periodSeconds: 10
@@ -184,6 +200,11 @@ spec:
           persistentVolumeClaim: {claimName: tinyauth-data}
         - name: extauth-nginx
           configMap: {name: tinyauth-extauth-nginx}
+        # Binary webp wallpaper, shipped from repo via tinyauth-bg.tf (kubernetes_
+        # config_map_v1 binary_data). Kept out of this manifest so the base64 blob
+        # doesn't bloat the templated YAML — same split as the Keycloak theme.
+        - name: bg
+          configMap: {name: tinyauth-bg}
 ---
 apiVersion: v1
 kind: Service

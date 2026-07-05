@@ -73,7 +73,9 @@ metrics:
 
 # Mount the custom "homelab" login theme (ConfigMap keycloak-theme-homelab,
 # created in keycloak-theme.tf) into the themes dir. subPath per-file so we only
-# add these two files under themes/homelab/login without clobbering the dir.
+# add these files under themes/homelab/login without clobbering the dir. The webp
+# lands in the theme's resources/ subdir, where Keycloak serves it at
+# ${url.resourcesPath}/homelab-bg.webp (login.ftl background).
 extraVolumes: |
   - name: theme-homelab
     configMap:
@@ -85,6 +87,9 @@ extraVolumeMounts: |
   - name: theme-homelab
     mountPath: /opt/keycloak/themes/homelab/login/login.ftl
     subPath: login.ftl
+  - name: theme-homelab
+    mountPath: /opt/keycloak/themes/homelab/login/resources/homelab-bg.webp
+    subPath: homelab-bg.webp
 
 service:
   httpPort: 80

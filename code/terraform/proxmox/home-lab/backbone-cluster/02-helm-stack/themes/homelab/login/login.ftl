@@ -1,6 +1,7 @@
 <#-- Homelab custom login page (Keycloak, homelab realm). Self-contained: all
-     markup + CSS inline, no external stylesheet/font. Background photo is the
-     only remote asset (Unsplash CDN) with a dark gradient fallback beneath. -->
+     markup + CSS inline, no external stylesheet/font. Background photo is served
+     locally as a theme resource (login/resources/homelab-bg.webp, shipped by
+     keycloak-theme.tf), with a dark gradient fallback beneath — no CDN hotlink. -->
 <!DOCTYPE html>
 <html lang="${(locale.currentLanguageTag)!'en'}">
 <head>
@@ -20,7 +21,7 @@
       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
       -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
     .bg{position:fixed;inset:0;z-index:-2;background:#08090c;
-      background-image:url("https://images.unsplash.com/photo-1638184984605-af1f05249a56?ixlib=rb-4.1.0&q=80&w=2400&auto=format&fit=crop");
+      background-image:url("${url.resourcesPath}/homelab-bg.webp");
       background-size:cover;background-position:center}
     .bg::after{content:"";position:absolute;inset:0;background:
       radial-gradient(1100px 760px at 28% 18%, rgba(99,102,241,.14), transparent 60%),

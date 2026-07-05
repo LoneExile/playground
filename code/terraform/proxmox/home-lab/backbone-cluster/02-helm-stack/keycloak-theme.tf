@@ -24,4 +24,13 @@ resource "kubernetes_config_map_v1" "keycloak_theme_homelab" {
     "theme.properties" = file("${path.module}/themes/homelab/login/theme.properties")
     "login.ftl"        = file("${path.module}/themes/homelab/login/login.ftl")
   }
+
+  # Login wallpaper, self-hosted as a theme resource instead of a CDN hotlink.
+  # Same assets/homelab-bg.webp that TinyAuth serves (tinyauth-bg.tf) — one source
+  # of truth, so both SSO screens share a byte-identical background. Mounted via
+  # subPath into themes/homelab/login/resources/ in values/keycloak.yaml, and
+  # referenced from login.ftl as ${url.resourcesPath}/homelab-bg.webp.
+  binary_data = {
+    "homelab-bg.webp" = filebase64("${path.module}/assets/homelab-bg.webp")
+  }
 }
